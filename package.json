@@ -11,9 +11,10 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "@anthropic-ai/sdk": "^0.24.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "@anthropic-ai/sdk": "^0.24.0"
+    "express": "^4.19.2",
+    "pg": "^8.22.0"
   }
 }
