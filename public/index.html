@@ -185,6 +185,35 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column}
 
 /* color helpers */
 .up{color:var(--up)}.down{color:var(--down)}.neutral{color:var(--muted)}
+
+/* ── History ── */
+.hist-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+.hist-filter-btn{padding:5px 14px;border-radius:16px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--muted);transition:all .12s}
+.hist-filter-btn.active{background:rgba(240,180,41,.12);border-color:rgba(240,180,41,.3);color:var(--accent)}
+.hist-filter-btn:hover:not(.active){border-color:var(--border2);color:var(--text)}
+.hist-search{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:var(--r);font-size:13px;outline:none;width:160px;margin-left:auto}
+.hist-search:focus{border-color:var(--accent)}
+.hist-empty{text-align:center;padding:60px 20px;color:var(--muted)}
+.hist-empty .icon{font-size:40px;margin-bottom:10px}
+.hist-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  padding:16px;margin-bottom:10px;cursor:pointer;transition:border-color .12s;
+}
+.hist-card:hover{border-color:var(--border2)}
+.hist-card-top{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.hist-sym{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--accent)}
+.hist-name{font-size:12px;color:var(--muted);flex:1}
+.hist-time{font-size:11px;color:var(--dim)}
+.hist-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.hist-price{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500}
+.hist-preview{font-size:12px;color:var(--muted);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.hist-actions{display:flex;gap:6px;margin-top:10px}
+/* History modal / detail */
+.hist-detail{max-height:70vh;overflow-y:auto}
+.hist-detail .ai-box{min-height:unset;font-size:13px}
+/* Note input */
+.note-input{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--r);font-size:12px;outline:none;resize:none;font-family:'IBM Plex Sans Thai',sans-serif;margin-top:8px}
+.note-input:focus{border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -214,6 +243,7 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column}
     <div class="nav-item" data-view="portfolio" onclick="switchView('portfolio',this)"><span class="nav-icon">💼</span><span>Portfolio</span></div>
     <div class="nav-item" data-view="watchlist" onclick="switchView('watchlist',this)"><span class="nav-icon">📋</span><span>Watchlist</span></div>
     <div class="nav-item" data-view="compare" onclick="switchView('compare',this)"><span class="nav-icon">⚖️</span><span>เปรียบเทียบ</span></div>
+    <div class="nav-item" data-view="history" onclick="switchView('history',this)"><span class="nav-icon">🕐</span><span>ประวัติวิเคราะห์</span></div>
     <div class="nav-divider"></div>
     <div class="nav-section">Portfolio ของคุณ</div>
     <div class="port-list" id="portList"><div style="padding:8px;font-size:12px;color:var(--dim)">ยังไม่มี — เพิ่มใน Portfolio</div></div>
@@ -345,6 +375,24 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column}
         </div>
       </div>
 
+      <!-- ══ HISTORY VIEW ══ -->
+      <div class="view" id="view-history">
+        <div class="section-title">
+          🕐 ประวัติการวิเคราะห์
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--down)" onclick="confirmClearHistory()">🗑 ล้างทั้งหมด</button>
+        </div>
+
+        <div class="hist-filters">
+          <button class="hist-filter-btn active" onclick="filterHistory('all',this)">ทั้งหมด</button>
+          <button class="hist-filter-btn" onclick="filterHistory('BULLISH',this)">🟢 Bullish</button>
+          <button class="hist-filter-btn" onclick="filterHistory('BEARISH',this)">🔴 Bearish</button>
+          <button class="hist-filter-btn" onclick="filterHistory('NEUTRAL',this)">⚪ Neutral</button>
+          <input class="hist-search" id="histSearchInput" placeholder="🔍 ค้นหา ticker..." oninput="renderHistoryList()">
+        </div>
+
+        <div id="histList"></div>
+      </div>
+
     </div>
   </main>
 </div>
@@ -359,11 +407,14 @@ main{flex:1;overflow:hidden;display:flex;flex-direction:column}
 let state = {
   portfolio: JSON.parse(localStorage.getItem('mega_portfolio') || '[]'),
   watchlists: JSON.parse(localStorage.getItem('mega_watchlists') || '[]'),
+  history: JSON.parse(localStorage.getItem('mega_history') || '[]'),
   activeWLId: null,
+  histFilter: 'all',
 };
 function saveState(){
   localStorage.setItem('mega_portfolio', JSON.stringify(state.portfolio));
   localStorage.setItem('mega_watchlists', JSON.stringify(state.watchlists));
+  localStorage.setItem('mega_history', JSON.stringify(state.history));
 }
 
 let curSym='', curQuote=null, curHistory=[], curIndicators=null, curSignals=null, curFund=null;
@@ -377,6 +428,7 @@ window.onload = () => {
   renderPortList();
   renderPortfolio();
   renderWLTabs();
+  renderHistoryList();
   checkServerAI();
 };
 
@@ -593,27 +645,43 @@ async function loadNews(sym){
 async function streamBackend(endpoint, body, outputEl){
   outputEl.innerHTML='<span class="cursor-blink"></span>';
   const res=await fetch('/api/ai/'+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!res.ok){outputEl.textContent='Server error '+res.status;return;}
+  if(!res.ok){outputEl.textContent='Server error '+res.status;return '';}
   let text=''; outputEl.textContent='';
   const reader=res.body.getReader(),dec=new TextDecoder();
   while(true){
     const{done,value}=await reader.read();if(done)break;
     for(const line of dec.decode(value).split('\n')){
       if(!line.startsWith('data:'))continue;
-      const raw=line.slice(5).trim();if(raw==='[DONE]')return;
+      const raw=line.slice(5).trim();if(raw==='[DONE]'){outputEl.innerHTML=md2html(text);return text;}
       try{const d=JSON.parse(raw);if(d.text){text+=d.text;outputEl.innerHTML=md2html(text)+'<span class="cursor-blink"></span>';outputEl.scrollTop=outputEl.scrollHeight;}}catch{}
     }
   }
   outputEl.innerHTML=md2html(text);
+  return text;
 }
 
 async function runStockAI(){
   if(!curQuote)return;
-  // load fund if not yet
   if(!curFund){try{const r=await fetch('/api/stock/'+curSym+'/fundamentals');const d=await r.json();if(d.ok)curFund=d.data;}catch{}}
-  // load news
   let news=[];try{const r=await fetch('/api/stock/'+curSym+'/news');const d=await r.json();if(d.ok)news=d.news;}catch{}
-  await streamBackend('analyze',{symbol:curSym,quote:curQuote,signals:{overallBias:curSignals.bias,bullCount:curSignals.bull,bearCount:curSignals.bear,rsi:curSignals.rsi,ma20:curSignals.ma20,ma50:curSignals.ma50,ma200:curSignals.ma200,signals:curSignals.sigs.map(s=>({label:s.l||s.label,detail:s.d||s.detail}))},fundamentals:curFund,history:curHistory.slice(-30),news},document.getElementById('aiBox'));
+  const aiText = await streamBackend('analyze',{symbol:curSym,quote:curQuote,signals:{overallBias:curSignals.bias,bullCount:curSignals.bull,bearCount:curSignals.bear,rsi:curSignals.rsi,ma20:curSignals.ma20,ma50:curSignals.ma50,ma200:curSignals.ma200,signals:curSignals.sigs.map(s=>({label:s.l||s.label,detail:s.d||s.detail}))},fundamentals:curFund,history:curHistory.slice(-30),news},document.getElementById('aiBox'));
+  // ── auto-save to history ──
+  if(aiText && aiText.length > 50){
+    saveAnalysisToHistory({
+      type: 'stock',
+      symbol: curSym,
+      shortName: curQuote.shortName,
+      price: curQuote.price,
+      changePct: curQuote.changePct,
+      bias: curSignals.bias,
+      rsi: curSignals.rsi,
+      ma50: curSignals.ma50,
+      ma200: curSignals.ma200,
+      marketCap: curQuote.marketCap,
+      aiText,
+      note: '',
+    });
+  }
 }
 
 async function runPortfolioAI(){
@@ -741,6 +809,172 @@ function closeModal(){document.getElementById('modal').style.display='none';}
 // ══ HELPERS ══
 function fmtLarge(n){if(!n)return'—';if(n>=1e12)return'$'+(n/1e12).toFixed(2)+'T';if(n>=1e9)return'$'+(n/1e9).toFixed(2)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(2)+'M';return'$'+n.toFixed(2);}
 function md2html(t){return t.replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/^[-•] (.+)$/gm,'<div style="margin-left:12px;margin-bottom:3px">• $1</div>').replace(/\n{2,}/g,'</p><p>').replace(/^(?!<[h|d|p])(.+)$/gm,'<p>$1</p>');}
+
+// ══ HISTORY ══
+function saveAnalysisToHistory(entry) {
+  const record = {
+    id: Date.now()+'',
+    createdAt: new Date().toISOString(),
+    ...entry,
+  };
+  // keep max 200 records, newest first
+  state.history.unshift(record);
+  if(state.history.length > 200) state.history = state.history.slice(0,200);
+  saveState();
+  updateHistoryBadge();
+}
+
+function updateHistoryBadge() {
+  const nav = document.querySelector('[data-view="history"] span:last-child');
+  if(nav && state.history.length) nav.textContent = `ประวัติวิเคราะห์ (${state.history.length})`;
+}
+
+function filterHistory(bias, el) {
+  state.histFilter = bias;
+  document.querySelectorAll('.hist-filter-btn').forEach(b => b.classList.remove('active'));
+  if(el) el.classList.add('active');
+  renderHistoryList();
+}
+
+function renderHistoryList() {
+  const container = document.getElementById('histList');
+  if(!container) return;
+  const q = (document.getElementById('histSearchInput')?.value || '').toUpperCase();
+  let items = state.history;
+  if(state.histFilter !== 'all') items = items.filter(h => h.bias === state.histFilter);
+  if(q) items = items.filter(h => h.symbol?.includes(q) || h.shortName?.toUpperCase().includes(q));
+
+  if(!items.length) {
+    container.innerHTML = `<div class="hist-empty"><div class="icon">🕐</div><p>${state.history.length ? 'ไม่พบรายการที่ตรงกับตัวกรอง' : 'ยังไม่มีประวัติ — กด "AI วิเคราะห์" แล้วจะบันทึกอัตโนมัติ'}</p></div>`;
+    return;
+  }
+
+  // group by date
+  const groups = {};
+  items.forEach(h => {
+    const day = new Date(h.createdAt).toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'});
+    if(!groups[day]) groups[day] = [];
+    groups[day].push(h);
+  });
+
+  container.innerHTML = Object.entries(groups).map(([day, records]) => `
+    <div style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:16px 0 8px;padding-left:2px">${day} · ${records.length} รายการ</div>
+    ${records.map(h => histCard(h)).join('')}
+  `).join('');
+}
+
+function histCard(h) {
+  const up = h.changePct >= 0;
+  const time = new Date(h.createdAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+  const biasColor = h.bias==='BULLISH'?'var(--up)':h.bias==='BEARISH'?'var(--down)':'var(--muted)';
+  const biasIcon = h.bias==='BULLISH'?'🟢':h.bias==='BEARISH'?'🔴':'⚪';
+  const preview = h.aiText ? h.aiText.replace(/<[^>]+>/g,'').slice(0,120)+'...' : '';
+  return `
+    <div class="hist-card" onclick="openHistDetail('${h.id}')">
+      <div class="hist-card-top">
+        <span class="hist-sym">${h.symbol}</span>
+        <div style="flex:1">
+          <div class="hist-name">${h.shortName || ''}</div>
+          ${h.note ? `<div style="font-size:11px;color:var(--warn);margin-top:2px">📝 ${h.note}</div>` : ''}
+        </div>
+        <span class="hist-time">${time}</span>
+      </div>
+      <div class="hist-meta">
+        <span class="hist-price">$${h.price?.toFixed(2)}</span>
+        <span class="${up?'up':'down'}" style="font-size:12px">${up?'+':''}${h.changePct?.toFixed(2)}%</span>
+        <span class="bias-badge ${h.bias}" style="font-size:10px;padding:2px 8px">${biasIcon} ${h.bias}</span>
+        ${h.rsi ? `<span style="font-size:11px;color:var(--muted)">RSI ${h.rsi.toFixed(0)}</span>` : ''}
+        ${h.marketCap ? `<span style="font-size:11px;color:var(--muted)">${fmtLarge(h.marketCap)}</span>` : ''}
+      </div>
+      ${preview ? `<div class="hist-preview">${preview}</div>` : ''}
+      <div class="hist-actions">
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openHistDetail('${h.id}')">📖 ดูเต็ม</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();loadStock('${h.symbol}');switchView('stock',document.querySelector('[data-view=stock]'))">📈 วิเคราะห์ใหม่</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editHistNote('${h.id}')" style="color:var(--warn)">📝 Note</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteHistRecord('${h.id}')" style="color:var(--down);margin-left:auto">✕</button>
+      </div>
+    </div>`;
+}
+
+function openHistDetail(id) {
+  const h = state.history.find(x => x.id === id);
+  if(!h) return;
+  const up = h.changePct >= 0;
+  const dt = new Date(h.createdAt).toLocaleString('th-TH',{dateStyle:'medium',timeStyle:'short'});
+  showModal(`
+    <h3>${h.symbol} · ${h.shortName}</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600">$${h.price?.toFixed(2)}</span>
+      <span class="${up?'up':'down'}">${up?'+':''}${h.changePct?.toFixed(2)}%</span>
+      <span class="bias-badge ${h.bias}">${h.bias}</span>
+      <span style="font-size:11px;color:var(--muted);margin-left:auto">${dt}</span>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      ${h.rsi ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">RSI</div><div class="stat-val">${h.rsi.toFixed(1)}</div></div>` : ''}
+      ${h.ma50 ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">MA50</div><div class="stat-val">$${h.ma50.toFixed(2)}</div></div>` : ''}
+      ${h.ma200 ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">MA200</div><div class="stat-val">$${h.ma200.toFixed(2)}</div></div>` : ''}
+      ${h.marketCap ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">Mkt Cap</div><div class="stat-val">${fmtLarge(h.marketCap)}</div></div>` : ''}
+    </div>
+    ${h.note ? `<div style="background:rgba(240,180,41,.08);border:1px solid rgba(240,180,41,.2);border-radius:var(--r);padding:10px 12px;margin-bottom:12px;font-size:13px;color:var(--warn)">📝 ${h.note}</div>` : ''}
+    <div class="hist-detail">
+      <div class="ai-box">${md2html(h.aiText || '')}</div>
+    </div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn btn-ghost btn-sm" onclick="editHistNote('${id}')">📝 เพิ่ม Note</button>
+      <button class="btn btn-ghost btn-sm" onclick="loadStock('${h.symbol}');switchView('stock',document.querySelector('[data-view=stock]'));closeModal()">📈 วิเคราะห์ใหม่</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">ปิด</button>
+    </div>
+  `);
+}
+
+function editHistNote(id) {
+  const h = state.history.find(x => x.id === id);
+  if(!h) return;
+  showModal(`
+    <h3>📝 Note สำหรับ ${h.symbol}</h3>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:10px">บันทึกความคิดเห็น, จุดเข้า, กลยุทธ์...</p>
+    <textarea class="note-input" id="noteTA" rows="4" placeholder="เช่น รอ pullback ที่ MA50 ก่อนเข้า...">${h.note || ''}</textarea>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button>
+      <button class="btn btn-primary btn-sm" onclick="saveHistNote('${id}')">บันทึก</button>
+    </div>
+  `);
+  setTimeout(()=>document.getElementById('noteTA')?.focus(),50);
+}
+
+function saveHistNote(id) {
+  const note = document.getElementById('noteTA')?.value.trim() || '';
+  const h = state.history.find(x => x.id === id);
+  if(h){ h.note = note; saveState(); renderHistoryList(); }
+  closeModal();
+}
+
+function deleteHistRecord(id) {
+  state.history = state.history.filter(x => x.id !== id);
+  saveState();
+  updateHistoryBadge();
+  renderHistoryList();
+}
+
+function confirmClearHistory() {
+  showModal(`
+    <h3>🗑 ล้างประวัติทั้งหมด</h3>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px">จะลบประวัติการวิเคราะห์ทั้ง ${state.history.length} รายการ ไม่สามารถกู้คืนได้</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button>
+      <button class="btn btn-danger btn-sm" onclick="clearAllHistory()">ล้างทั้งหมด</button>
+    </div>
+  `);
+}
+
+function clearAllHistory() {
+  state.history = [];
+  saveState();
+  updateHistoryBadge();
+  renderHistoryList();
+  closeModal();
+}
+
 </script>
 </body>
 </html>
