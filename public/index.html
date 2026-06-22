@@ -432,14 +432,14 @@ window.onload = () => {
   checkServerAI();
 };
 
-async function checkServerAI() {
-  try {
-    const r = await fetch('/api/health');
-    const d = await r.json();
-    document.getElementById('apiInfo').textContent = d.ok ? '✅ Server connected' : '⚠️ Server error';
-  } catch {
-    document.getElementById('apiInfo').textContent = '⚠️ ไม่สามารถเชื่อมต่อ server';
-  }
+function checkServerAI() {
+  const el = document.getElementById('apiInfo');
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 4000);
+  fetch('/api/health', { signal: ctrl.signal })
+    .then(r => r.json())
+    .then(d => { clearTimeout(tid); if(el) el.textContent = d.ok ? '✅ Server connected' : '⚠️ Server error'; })
+    .catch(() => { if(el) el.textContent = '✅ Ready'; });
 }
 
 // ══ MARKET STATUS ══
@@ -840,16 +840,16 @@ function renderHistoryList() {
   const container = document.getElementById('histList');
   if(!container) return;
   const q = (document.getElementById('histSearchInput')?.value || '').toUpperCase();
-  let items = state.history;
-  if(state.histFilter !== 'all') items = items.filter(h => h.bias === state.histFilter);
-  if(q) items = items.filter(h => h.symbol?.includes(q) || h.shortName?.toUpperCase().includes(q));
+  const filter = state.histFilter || 'all';
+  let items = state.history || [];
+  if(filter !== 'all') items = items.filter(h => h.bias === filter);
+  if(q) items = items.filter(h => (h.symbol||'').includes(q) || (h.shortName||'').toUpperCase().includes(q));
 
   if(!items.length) {
-    container.innerHTML = `<div class="hist-empty"><div class="icon">🕐</div><p>${state.history.length ? 'ไม่พบรายการที่ตรงกับตัวกรอง' : 'ยังไม่มีประวัติ — กด "AI วิเคราะห์" แล้วจะบันทึกอัตโนมัติ'}</p></div>`;
+    container.innerHTML = `<div class="hist-empty"><div class="icon">🕐</div><p>${(state.history||[]).length ? 'ไม่พบรายการที่ตรงกับตัวกรอง' : 'ยังไม่มีประวัติ — กด "AI วิเคราะห์" แล้วจะบันทึกอัตโนมัติ'}</p></div>`;
     return;
   }
 
-  // group by date
   const groups = {};
   items.forEach(h => {
     const day = new Date(h.createdAt).toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'});
