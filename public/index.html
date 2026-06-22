@@ -811,22 +811,33 @@ function fmtLarge(n){if(!n)return'—';if(n>=1e12)return'$'+(n/1e12).toFixed(2)+
 function md2html(t){return t.replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/^[-•] (.+)$/gm,'<div style="margin-left:12px;margin-bottom:3px">• $1</div>').replace(/\n{2,}/g,'</p><p>').replace(/^(?!<[h|d|p])(.+)$/gm,'<p>$1</p>');}
 
 // ══ HISTORY ══
-function saveAnalysisToHistory(entry) {
-  const record = {
-    id: Date.now()+'',
-    createdAt: new Date().toISOString(),
-    ...entry,
-  };
-  // keep max 200 records, newest first
-  state.history.unshift(record);
-  if(state.history.length > 200) state.history = state.history.slice(0,200);
-  saveState();
-  updateHistoryBadge();
+// History ใช้ PostgreSQL ผ่าน /api/history  (localStorage เป็น fallback)
+async function saveAnalysisToHistory(entry) {
+  try {
+    const r = await fetch('/api/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      renderHistoryList();
+      updateHistoryBadge();
+    }
+  } catch(e) {
+    // fallback: localStorage
+    const rec = { id: Date.now()+'', createdAt: new Date().toISOString(), ...entry };
+    state.history.unshift(rec);
+    if(state.history.length > 200) state.history = state.history.slice(0,200);
+    saveState();
+    renderHistoryList();
+    updateHistoryBadge();
+  }
 }
 
 function updateHistoryBadge() {
   const nav = document.querySelector('[data-view="history"] span:last-child');
-  if(nav && state.history.length) nav.textContent = `ประวัติวิเคราะห์ (${state.history.length})`;
+  if(nav) nav.textContent = 'ประวัติวิเคราะห์';
 }
 
 function filterHistory(bias, el) {
@@ -836,104 +847,163 @@ function filterHistory(bias, el) {
   renderHistoryList();
 }
 
-function renderHistoryList() {
+async function renderHistoryList() {
   const container = document.getElementById('histList');
   if(!container) return;
+
+  container.innerHTML = '<div class="loader"><div class="spin"></div> โหลดประวัติ...</div>';
+
   const q = (document.getElementById('histSearchInput')?.value || '').toUpperCase();
   const filter = state.histFilter || 'all';
-  let items = state.history || [];
-  if(filter !== 'all') items = items.filter(h => h.bias === filter);
-  if(q) items = items.filter(h => (h.symbol||'').includes(q) || (h.shortName||'').toUpperCase().includes(q));
 
-  if(!items.length) {
-    container.innerHTML = `<div class="hist-empty"><div class="icon">🕐</div><p>${(state.history||[]).length ? 'ไม่พบรายการที่ตรงกับตัวกรอง' : 'ยังไม่มีประวัติ — กด "AI วิเคราะห์" แล้วจะบันทึกอัตโนมัติ'}</p></div>`;
-    return;
+  try {
+    const params = new URLSearchParams({ limit: 100 });
+    if(filter !== 'all') params.set('bias', filter);
+    if(q) params.set('symbol', q);
+
+    const r = await fetch('/api/history?' + params);
+    const d = await r.json();
+
+    if(!d.ok) throw new Error(d.error);
+    const items = d.data;
+
+    if(!items.length) {
+      container.innerHTML = `<div class="hist-empty"><div class="icon">🕐</div><p>${d.total === 0 ? 'ยังไม่มีประวัติ — กด "AI วิเคราะห์" แล้วจะบันทึกอัตโนมัติ' : 'ไม่พบรายการที่ตรงกับตัวกรอง'}</p></div>`;
+      return;
+    }
+
+    // group by date
+    const groups = {};
+    items.forEach(h => {
+      const day = new Date(h.created_at).toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'});
+      if(!groups[day]) groups[day] = [];
+      groups[day].push(h);
+    });
+
+    container.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:12px">ทั้งหมด ${d.total} รายการ</div>` +
+      Object.entries(groups).map(([day, records]) => `
+        <div style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:16px 0 8px;padding-left:2px">${day} · ${records.length} รายการ</div>
+        ${records.map(h => histCard(h)).join('')}
+      `).join('');
+
+  } catch(e) {
+    // fallback: localStorage
+    let items = state.history || [];
+    if(filter !== 'all') items = items.filter(h => h.bias === filter);
+    if(q) items = items.filter(h => (h.symbol||'').includes(q));
+    if(!items.length) {
+      container.innerHTML = `<div class="hist-empty"><div class="icon">🕐</div><p>ยังไม่มีประวัติ</p></div>`;
+      return;
+    }
+    const groups = {};
+    items.forEach(h => {
+      const day = new Date(h.createdAt||h.created_at).toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'});
+      if(!groups[day]) groups[day] = [];
+      groups[day].push(h);
+    });
+    container.innerHTML = Object.entries(groups).map(([day, records]) => `
+      <div style="font-size:11px;font-weight:600;color:var(--dim);margin:16px 0 8px">${day}</div>
+      ${records.map(h => histCard(h)).join('')}
+    `).join('');
   }
-
-  const groups = {};
-  items.forEach(h => {
-    const day = new Date(h.createdAt).toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'});
-    if(!groups[day]) groups[day] = [];
-    groups[day].push(h);
-  });
-
-  container.innerHTML = Object.entries(groups).map(([day, records]) => `
-    <div style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:16px 0 8px;padding-left:2px">${day} · ${records.length} รายการ</div>
-    ${records.map(h => histCard(h)).join('')}
-  `).join('');
 }
 
 function histCard(h) {
-  const up = h.changePct >= 0;
-  const time = new Date(h.createdAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
-  const biasColor = h.bias==='BULLISH'?'var(--up)':h.bias==='BEARISH'?'var(--down)':'var(--muted)';
-  const biasIcon = h.bias==='BULLISH'?'🟢':h.bias==='BEARISH'?'🔴':'⚪';
-  const preview = h.aiText ? h.aiText.replace(/<[^>]+>/g,'').slice(0,120)+'...' : '';
+  // support both DB (snake_case) and localStorage (camelCase)
+  const sym = h.symbol;
+  const name = h.short_name || h.shortName || '';
+  const price = h.price;
+  const pct = parseFloat(h.change_pct ?? h.changePct ?? 0);
+  const bias = h.bias || 'NEUTRAL';
+  const rsi = h.rsi;
+  const cap = h.market_cap || h.marketCap;
+  const note = h.note || '';
+  const preview = (h.ai_preview || h.aiText || '').replace(/<[^>]+>/g,'').slice(0,120);
+  const id = h.id;
+  const up = pct >= 0;
+  const time = new Date(h.created_at || h.createdAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+
   return `
-    <div class="hist-card" onclick="openHistDetail('${h.id}')">
+    <div class="hist-card" onclick="openHistDetail('${id}')">
       <div class="hist-card-top">
-        <span class="hist-sym">${h.symbol}</span>
+        <span class="hist-sym">${sym}</span>
         <div style="flex:1">
-          <div class="hist-name">${h.shortName || ''}</div>
-          ${h.note ? `<div style="font-size:11px;color:var(--warn);margin-top:2px">📝 ${h.note}</div>` : ''}
+          <div class="hist-name">${name}</div>
+          ${note ? `<div style="font-size:11px;color:var(--warn);margin-top:2px">📝 ${note}</div>` : ''}
         </div>
         <span class="hist-time">${time}</span>
       </div>
       <div class="hist-meta">
-        <span class="hist-price">$${h.price?.toFixed(2)}</span>
-        <span class="${up?'up':'down'}" style="font-size:12px">${up?'+':''}${h.changePct?.toFixed(2)}%</span>
-        <span class="bias-badge ${h.bias}" style="font-size:10px;padding:2px 8px">${biasIcon} ${h.bias}</span>
-        ${h.rsi ? `<span style="font-size:11px;color:var(--muted)">RSI ${h.rsi.toFixed(0)}</span>` : ''}
-        ${h.marketCap ? `<span style="font-size:11px;color:var(--muted)">${fmtLarge(h.marketCap)}</span>` : ''}
+        <span class="hist-price">$${parseFloat(price).toFixed(2)}</span>
+        <span class="${up?'up':'down'}" style="font-size:12px">${up?'+':''}${pct.toFixed(2)}%</span>
+        <span class="bias-badge ${bias}" style="font-size:10px;padding:2px 8px">${bias==='BULLISH'?'🟢':bias==='BEARISH'?'🔴':'⚪'} ${bias}</span>
+        ${rsi ? `<span style="font-size:11px;color:var(--muted)">RSI ${parseFloat(rsi).toFixed(0)}</span>` : ''}
+        ${cap ? `<span style="font-size:11px;color:var(--muted)">${fmtLarge(cap)}</span>` : ''}
       </div>
-      ${preview ? `<div class="hist-preview">${preview}</div>` : ''}
+      ${preview ? `<div class="hist-preview">${preview}...</div>` : ''}
       <div class="hist-actions">
-        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openHistDetail('${h.id}')">📖 ดูเต็ม</button>
-        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();loadStock('${h.symbol}');switchView('stock',document.querySelector('[data-view=stock]'))">📈 วิเคราะห์ใหม่</button>
-        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editHistNote('${h.id}')" style="color:var(--warn)">📝 Note</button>
-        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteHistRecord('${h.id}')" style="color:var(--down);margin-left:auto">✕</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openHistDetail('${id}')">📖 ดูเต็ม</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();loadStock('${sym}');switchView('stock',document.querySelector('[data-view=stock]'))">📈 วิเคราะห์ใหม่</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editHistNote('${id}')" style="color:var(--warn)">📝 Note</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteHistRecord('${id}')" style="color:var(--down);margin-left:auto">✕</button>
       </div>
     </div>`;
 }
 
-function openHistDetail(id) {
-  const h = state.history.find(x => x.id === id);
+async function openHistDetail(id) {
+  // fetch full ai_text from DB
+  let h;
+  try {
+    const r = await fetch('/api/history/' + id);
+    const d = await r.json();
+    h = d.ok ? d.data : state.history.find(x => x.id == id);
+  } catch {
+    h = state.history.find(x => x.id == id);
+  }
   if(!h) return;
-  const up = h.changePct >= 0;
-  const dt = new Date(h.createdAt).toLocaleString('th-TH',{dateStyle:'medium',timeStyle:'short'});
+
+  const pct = parseFloat(h.change_pct ?? h.changePct ?? 0);
+  const up = pct >= 0;
+  const dt = new Date(h.created_at || h.createdAt).toLocaleString('th-TH',{dateStyle:'medium',timeStyle:'short'});
+  const bias = h.bias || 'NEUTRAL';
+  const aiText = h.ai_text || h.aiText || '';
+
   showModal(`
-    <h3>${h.symbol} · ${h.shortName}</h3>
+    <h3>${h.symbol} · ${h.short_name || h.shortName || ''}</h3>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
-      <span style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600">$${h.price?.toFixed(2)}</span>
-      <span class="${up?'up':'down'}">${up?'+':''}${h.changePct?.toFixed(2)}%</span>
-      <span class="bias-badge ${h.bias}">${h.bias}</span>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600">$${parseFloat(h.price).toFixed(2)}</span>
+      <span class="${up?'up':'down'}">${up?'+':''}${pct.toFixed(2)}%</span>
+      <span class="bias-badge ${bias}">${bias}</span>
       <span style="font-size:11px;color:var(--muted);margin-left:auto">${dt}</span>
     </div>
-    <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
-      ${h.rsi ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">RSI</div><div class="stat-val">${h.rsi.toFixed(1)}</div></div>` : ''}
-      ${h.ma50 ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">MA50</div><div class="stat-val">$${h.ma50.toFixed(2)}</div></div>` : ''}
-      ${h.ma200 ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">MA200</div><div class="stat-val">$${h.ma200.toFixed(2)}</div></div>` : ''}
-      ${h.marketCap ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">Mkt Cap</div><div class="stat-val">${fmtLarge(h.marketCap)}</div></div>` : ''}
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      ${h.rsi ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">RSI</div><div class="stat-val">${parseFloat(h.rsi).toFixed(1)}</div></div>` : ''}
+      ${h.ma50 ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">MA50</div><div class="stat-val">$${parseFloat(h.ma50).toFixed(2)}</div></div>` : ''}
+      ${h.ma200 ? `<div class="stat-card" style="padding:8px 12px"><div class="stat-label">MA200</div><div class="stat-val">$${parseFloat(h.ma200).toFixed(2)}</div></div>` : ''}
     </div>
     ${h.note ? `<div style="background:rgba(240,180,41,.08);border:1px solid rgba(240,180,41,.2);border-radius:var(--r);padding:10px 12px;margin-bottom:12px;font-size:13px;color:var(--warn)">📝 ${h.note}</div>` : ''}
-    <div class="hist-detail">
-      <div class="ai-box">${md2html(h.aiText || '')}</div>
-    </div>
+    <div class="hist-detail"><div class="ai-box">${md2html(aiText)}</div></div>
     <div class="modal-actions" style="margin-top:14px">
-      <button class="btn btn-ghost btn-sm" onclick="editHistNote('${id}')">📝 เพิ่ม Note</button>
+      <button class="btn btn-ghost btn-sm" onclick="editHistNote('${id}')">📝 Note</button>
       <button class="btn btn-ghost btn-sm" onclick="loadStock('${h.symbol}');switchView('stock',document.querySelector('[data-view=stock]'));closeModal()">📈 วิเคราะห์ใหม่</button>
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">ปิด</button>
     </div>
   `);
 }
 
-function editHistNote(id) {
-  const h = state.history.find(x => x.id === id);
-  if(!h) return;
+async function editHistNote(id) {
+  // get current note
+  let note = '';
+  let sym = '';
+  try {
+    const r = await fetch('/api/history/' + id);
+    const d = await r.json();
+    if(d.ok){ note = d.data.note || ''; sym = d.data.symbol; }
+  } catch { sym = '?'; }
   showModal(`
-    <h3>📝 Note สำหรับ ${h.symbol}</h3>
+    <h3>📝 Note สำหรับ ${sym}</h3>
     <p style="color:var(--muted);font-size:12px;margin-bottom:10px">บันทึกความคิดเห็น, จุดเข้า, กลยุทธ์...</p>
-    <textarea class="note-input" id="noteTA" rows="4" placeholder="เช่น รอ pullback ที่ MA50 ก่อนเข้า...">${h.note || ''}</textarea>
+    <textarea class="note-input" id="noteTA" rows="4" placeholder="เช่น รอ pullback ที่ MA50 ก่อนเข้า...">${note}</textarea>
     <div class="modal-actions">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button>
       <button class="btn btn-primary btn-sm" onclick="saveHistNote('${id}')">บันทึก</button>
@@ -942,24 +1012,37 @@ function editHistNote(id) {
   setTimeout(()=>document.getElementById('noteTA')?.focus(),50);
 }
 
-function saveHistNote(id) {
+async function saveHistNote(id) {
   const note = document.getElementById('noteTA')?.value.trim() || '';
-  const h = state.history.find(x => x.id === id);
-  if(h){ h.note = note; saveState(); renderHistoryList(); }
+  try {
+    await fetch('/api/history/' + id + '/note', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+  } catch {
+    // fallback localStorage
+    const h = state.history.find(x => x.id == id);
+    if(h){ h.note = note; saveState(); }
+  }
   closeModal();
-}
-
-function deleteHistRecord(id) {
-  state.history = state.history.filter(x => x.id !== id);
-  saveState();
-  updateHistoryBadge();
   renderHistoryList();
 }
 
-function confirmClearHistory() {
+async function deleteHistRecord(id) {
+  try {
+    await fetch('/api/history/' + id, { method: 'DELETE' });
+  } catch {
+    state.history = state.history.filter(x => x.id != id);
+    saveState();
+  }
+  renderHistoryList();
+}
+
+async function confirmClearHistory() {
   showModal(`
     <h3>🗑 ล้างประวัติทั้งหมด</h3>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:16px">จะลบประวัติการวิเคราะห์ทั้ง ${state.history.length} รายการ ไม่สามารถกู้คืนได้</p>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px">จะลบประวัติการวิเคราะห์ทั้งหมดออกจาก Database ไม่สามารถกู้คืนได้</p>
     <div class="modal-actions">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button>
       <button class="btn btn-danger btn-sm" onclick="clearAllHistory()">ล้างทั้งหมด</button>
@@ -967,12 +1050,14 @@ function confirmClearHistory() {
   `);
 }
 
-function clearAllHistory() {
-  state.history = [];
-  saveState();
-  updateHistoryBadge();
-  renderHistoryList();
+async function clearAllHistory() {
+  try {
+    await fetch('/api/history', { method: 'DELETE' });
+  } catch {
+    state.history = []; saveState();
+  }
   closeModal();
+  renderHistoryList();
 }
 
 </script>
