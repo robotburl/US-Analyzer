@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mega Stock · AI Analyzer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg:      #0d1117;
+  --surface: #161b22;
+  --card:    #1c2128;
+  --border:  #30363d;
+  --border2: #444c56;
+  --accent:  #f0b429;
+  --blue:    #388bfd;
+  --text:    #e6edf3;
+  --muted:   #7d8590;
+  --dim:     #484f58;
+  --up:      #3fb950;
+  --down:    #f85149;
+  --warn:    #d29922;
+  --r:       8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans Thai',sans-serif;font-size:14px;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* ── Header ── */
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+.logo{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:16px;letter-spacing:-0.5px;color:var(--accent)}
+.logo span{color:var(--text)}
+.badge{background:rgba(240,180,41,.12);color:var(--accent);border:1px solid rgba(240,180,41,.28);border-radius:20px;padding:2px 10px;font-size:11px;font-weight:500}
+.mkt-pill{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.mkt-dot{width:7px;height:7px;border-radius:50%;background:var(--up)}
+.mkt-dot.blink{animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ── Shell ── */
+.shell{display:flex;flex:1;overflow:hidden}
+aside{width:248px;flex-shrink:0;border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
+.side-top{padding:14px 12px 8px;flex-shrink:0}
+.search-wrap{position:relative}
+.side-search{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 12px 8px 34px;border-radius:var(--r);font-size:13px;outline:none}
+.side-search:focus{border-color:var(--accent)}
+.side-search::placeholder{color:var(--muted)}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px;pointer-events:none}
+.nav-section{padding:16px 12px 6px;font-size:10px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.8px}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 12px;margin:1px 6px;border-radius:6px;cursor:pointer;color:var(--muted);font-size:13px;transition:all .12s}
+.nav-item:hover{background:var(--card);color:var(--text)}
+.nav-item.active{background:rgba(240,180,41,.12);color:var(--accent);font-weight:500}
+.nav-icon{font-size:15px;width:20px;text-align:center}
+.nav-divider{height:1px;background:var(--border);margin:8px 12px}
+.port-list{flex:1;overflow-y:auto;padding:0 6px 12px}
+.port-row{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;cursor:pointer;transition:background .1s}
+.port-row:hover{background:var(--card)}
+.port-row.active{background:rgba(240,180,41,.1)}
+.port-sym{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:500;width:52px;color:var(--text)}
+.port-name{font-size:11px;color:var(--muted);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.port-chg{font-size:11px;font-weight:500;width:56px;text-align:right;font-family:'IBM Plex Mono',monospace}
+.side-footer{padding:12px;border-top:1px solid var(--border);flex-shrink:0}
+.api-info{font-size:11px;color:var(--dim)}
+
+/* ── Main ── */
+main{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.content{flex:1;overflow-y:auto;padding:20px 24px}
+.view{display:none}
+.view.active{display:block}
+
+/* ── Tabs ── */
+.tab-row{display:flex;border-bottom:1px solid var(--border);margin-bottom:20px}
+.tab{padding:10px 18px;cursor:pointer;font-size:13px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .12s;white-space:nowrap}
+.tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.tab:hover:not(.active){color:var(--text)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* ── Cards & Stats ── */
+.stat-bar{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:20px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px}
+.stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.stat-val{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:500}
+
+/* ── Stock Header ── */
+.stock-hdr{display:flex;align-items:flex-start;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.stock-ticker-big{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600}
+.stock-name-sub{font-size:13px;color:var(--muted);margin-top:3px}
+.stock-price-right{text-align:right}
+.price-big{font-family:'IBM Plex Mono',monospace;font-size:30px;font-weight:600;line-height:1}
+.price-chg{font-size:14px;font-weight:500;margin-top:4px}
+.bias-badge{padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;letter-spacing:.5px;display:inline-block;margin-top:6px}
+.bias-badge.BULLISH{background:rgba(63,185,80,.12);color:var(--up);border:1px solid rgba(63,185,80,.28)}
+.bias-badge.BEARISH{background:rgba(248,81,73,.12);color:var(--down);border:1px solid rgba(248,81,73,.28)}
+.bias-badge.NEUTRAL{background:rgba(125,133,144,.12);color:var(--muted);border:1px solid rgba(125,133,144,.28)}
+.earn-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(56,139,253,.1);color:var(--blue);border:1px solid rgba(56,139,253,.25);border-radius:16px;padding:3px 10px;font-size:11px;margin-bottom:14px}
+
+/* ── Signals ── */
+.signals-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
+.sig{padding:4px 10px;border-radius:16px;font-size:11px;font-weight:500;border:1px solid}
+.sig.bullish{background:rgba(63,185,80,.08);color:var(--up);border-color:rgba(63,185,80,.25)}
+.sig.bearish{background:rgba(248,81,73,.08);color:var(--down);border-color:rgba(248,81,73,.25)}
+.sig.neutral{background:rgba(125,133,144,.08);color:var(--muted);border-color:rgba(125,133,144,.2)}
+
+/* ── Charts ── */
+.chart-tabs{display:flex;gap:4px;margin-bottom:10px}
+.ctab{padding:4px 12px;border-radius:5px;font-size:12px;cursor:pointer;color:var(--muted);background:transparent;border:1px solid transparent}
+.ctab.active{background:var(--border);color:var(--text)}
+.chart-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:16px}
+
+/* ── Fundamentals ── */
+.fund-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+@media(max-width:640px){.fund-grid{grid-template-columns:1fr}}
+.fund-section-title{font-size:10px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
+.fund-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)}
+.fund-row:last-child{border:none}
+.fk{color:var(--muted);font-size:12px}
+.fv{font-family:'IBM Plex Mono',monospace;font-size:13px}
+
+/* ── AI Output ── */
+.ai-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;font-size:13px;line-height:1.75;color:var(--text);white-space:pre-wrap;word-break:break-word;min-height:180px}
+.ai-box h2{font-size:14px;font-weight:600;color:var(--accent);margin:14px 0 6px}
+.ai-box h3{font-size:13px;font-weight:600;color:#8b949e;margin:10px 0 4px}
+.ai-box strong{color:var(--warn)}
+.cursor-blink::after{content:'▌';animation:cur .8s infinite}
+@keyframes cur{0%,100%{opacity:1}50%{opacity:0}}
+.ai-actions{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+
+/* ── News ── */
+.news-item{padding:12px 0;border-bottom:1px solid var(--border)}
+.news-item:last-child{border:none}
+.news-title a{color:var(--text);text-decoration:none;font-size:13px;font-weight:500;line-height:1.4}
+.news-title a:hover{color:var(--accent)}
+.news-meta{font-size:11px;color:var(--muted);margin-top:3px}
+.news-desc{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.5}
+
+/* ── Portfolio ── */
+.port-summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px}
+.port-table{width:100%;border-collapse:collapse}
+.port-table th{text-align:left;padding:8px 12px;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)}
+.port-table td{padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px}
+.port-table tr:hover td{background:rgba(255,255,255,.025)}
+.port-table .mono{font-family:'IBM Plex Mono',monospace}
+.pbar-wrap{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.pbar-fill{height:100%;background:var(--accent);border-radius:2px}
+
+/* ── Compare ── */
+.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+@media(max-width:600px){.cmp-grid{grid-template-columns:1fr}}
+
+/* ── Watchlist ── */
+.wl-chip{padding:5px 12px;border-radius:16px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--muted)}
+.wl-chip.active{background:rgba(240,180,41,.12);border-color:rgba(240,180,41,.3);color:var(--accent)}
+.wl-chip:hover:not(.active){border-color:var(--border2);color:var(--text)}
+
+/* ── Loader / Placeholder ── */
+.loader{display:flex;align-items:center;gap:10px;color:var(--muted);padding:40px;justify-content:center}
+.spin{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.placeholder{text-align:center;padding:60px 20px;color:var(--muted)}
+.placeholder .icon{font-size:44px;margin-bottom:12px}
+.placeholder h3{font-size:16px;font-weight:500;color:var(--text);margin-bottom:6px}
+.placeholder p{font-size:13px;line-height:1.6}
+
+/* ── Buttons ── */
+.btn{padding:9px 16px;border-radius:var(--r);border:none;cursor:pointer;font-size:13px;font-weight:500;transition:all .12s}
+.btn-primary{background:var(--accent);color:#111}
+.btn-primary:hover{opacity:.88}
+.btn-ghost{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:var(--border2)}
+.btn-sm{padding:5px 12px;font-size:12px}
+
+/* ── Modal ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:flex;align-items:center;justify-content:center}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;min-width:340px;max-width:90vw}
+.modal h3{font-size:15px;font-weight:600;margin-bottom:14px}
+.modal input{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 13px;border-radius:var(--r);font-size:13px;outline:none;margin-bottom:10px}
+.modal input:focus{border-color:var(--accent)}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
+.section-title{font-size:16px;font-weight:600;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+
+/* color helpers */
+.up{color:var(--up)}.down{color:var(--down)}.neutral{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Mega<span>·AI</span></div>
+  <div class="badge">US Stocks</div>
+  <div class="mkt-pill">
+    <div class="mkt-dot blink" id="mktDot"></div>
+    <span id="mktLabel">ตรวจสอบ...</span>
+  </div>
+</header>
+
+<div class="shell">
+  <!-- SIDEBAR -->
+  <aside>
+    <div class="side-top">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input class="side-search" id="sideSearch" placeholder="พิมพ์ ticker..."
+          oninput="filterPortList(this.value)"
+          onkeydown="if(event.key==='Enter'){loadStockFromSearch(this.value)}">
+      </div>
+    </div>
+    <div class="nav-section">เมนู</div>
+    <div class="nav-item active" data-view="stock" onclick="switchView('stock',this)"><span class="nav-icon">📈</span><span>วิเคราะห์หุ้น</span></div>
+    <div class="nav-item" data-view="portfolio" onclick="switchView('portfolio',this)"><span class="nav-icon">💼</span><span>Portfolio</span></div>
+    <div class="nav-item" data-view="watchlist" onclick="switchView('watchlist',this)"><span class="nav-icon">📋</span><span>Watchlist</span></div>
+    <div class="nav-item" data-view="compare" onclick="switchView('compare',this)"><span class="nav-icon">⚖️</span><span>เปรียบเทียบ</span></div>
+    <div class="nav-divider"></div>
+    <div class="nav-section">Portfolio ของคุณ</div>
+    <div class="port-list" id="portList"><div style="padding:8px;font-size:12px;color:var(--dim)">ยังไม่มี — เพิ่มใน Portfolio</div></div>
+    <div class="side-footer"><div class="api-info" id="apiInfo">✅ AI พร้อมใช้งาน</div></div>
+  </aside>
+
+  <!-- MAIN -->
+  <main>
+    <div class="content">
+
+      <!-- ══ STOCK VIEW ══ -->
+      <div class="view active" id="view-stock">
+        <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center">
+          <input id="symInput" style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:var(--r);font-family:'IBM Plex Mono',monospace;font-size:14px;outline:none"
+            placeholder="ใส่ Ticker เช่น NVDA, TSM, AAPL..." autocomplete="off"
+            onkeydown="if(event.key==='Enter')loadStock(this.value)">
+          <button class="btn btn-primary" onclick="loadStock(document.getElementById('symInput').value)">วิเคราะห์</button>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px" id="quickChips"></div>
+
+        <div class="placeholder" id="stockPlaceholder">
+          <div class="icon">📈</div>
+          <h3>เลือกหุ้น US เพื่อวิเคราะห์</h3>
+          <p>ข้อมูลจาก Yahoo Finance · AI วิเคราะห์ภาษาไทยด้วย Claude<br>Technical · Fundamental · Chart · News</p>
+        </div>
+
+        <div id="stockResult" style="display:none">
+          <div class="stock-hdr">
+            <div style="flex:1;min-width:200px">
+              <div class="stock-ticker-big" id="rTicker">—</div>
+              <div class="stock-name-sub" id="rName">—</div>
+              <div id="rEarn" style="margin-top:8px"></div>
+            </div>
+            <div class="stock-price-right">
+              <div class="price-big" id="rPrice">—</div>
+              <div class="price-chg" id="rChg">—</div>
+              <div id="rBias"></div>
+            </div>
+          </div>
+          <div class="signals-row" id="signalsRow"></div>
+          <div class="stat-bar" id="statBar"></div>
+
+          <div class="tab-row">
+            <div class="tab active" onclick="switchTab(this,'tchart')">📊 กราฟ</div>
+            <div class="tab" onclick="switchTab(this,'ttech')">🔧 Technical</div>
+            <div class="tab" onclick="switchTab(this,'tfund')">💹 Fundamental</div>
+            <div class="tab" onclick="switchTab(this,'tai')">🤖 AI</div>
+            <div class="tab" onclick="switchTab(this,'tnews')">📰 ข่าว</div>
+          </div>
+
+          <div class="tab-panel active" id="tab-tchart">
+            <div class="chart-tabs">
+              <div class="ctab active" onclick="switchChart('price',this)">Price + MA</div>
+              <div class="ctab" onclick="switchChart('rsi',this)">RSI</div>
+              <div class="ctab" onclick="switchChart('macd',this)">MACD</div>
+              <div class="ctab" onclick="switchChart('bb',this)">Bollinger</div>
+              <div class="ctab" onclick="switchChart('vol',this)">Volume</div>
+            </div>
+            <div class="chart-box" style="height:320px"><canvas id="mainChart"></canvas></div>
+          </div>
+
+          <div class="tab-panel" id="tab-ttech">
+            <div class="stat-bar" id="techGrid"></div>
+          </div>
+
+          <div class="tab-panel" id="tab-tfund">
+            <div class="fund-grid" id="fundGrid"><div class="loader"><div class="spin"></div> โหลด fundamental...</div></div>
+          </div>
+
+          <div class="tab-panel" id="tab-tai">
+            <div class="ai-actions">
+              <button class="btn btn-primary" onclick="runStockAI()">🤖 AI วิเคราะห์ (Streaming)</button>
+              <button class="btn btn-ghost btn-sm" onclick="addToWatchlistPrompt()">+ Watchlist</button>
+              <button class="btn btn-ghost btn-sm" onclick="addToPortfolioPrompt()">+ Portfolio</button>
+            </div>
+            <div class="ai-box" id="aiBox"><span style="color:var(--muted)">กด "AI วิเคราะห์" เพื่อรับการวิเคราะห์ streaming ภาษาไทย...</span></div>
+          </div>
+
+          <div class="tab-panel" id="tab-tnews">
+            <div id="newsBox"><div class="loader"><div class="spin"></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ PORTFOLIO VIEW ══ -->
+      <div class="view" id="view-portfolio">
+        <div class="section-title">💼 Portfolio <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="openAddHolding()">+ เพิ่มหุ้น</button></div>
+        <div class="port-summary" id="portSummary"></div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:16px">
+          <table class="port-table"><thead><tr>
+            <th>Ticker</th><th>ชื่อ</th><th>ราคา</th><th>ต้นทุน</th><th>จำนวน</th><th>มูลค่า</th><th>กำไร/ขาดทุน</th><th>สัดส่วน</th><th></th>
+          </tr></thead><tbody id="portBody"></tbody></table>
+        </div>
+        <div id="portAIWrap" style="display:none">
+          <button class="btn btn-primary" style="margin-bottom:12px" onclick="runPortfolioAI()">🤖 AI วิเคราะห์พอร์ต</button>
+          <div class="ai-box" id="portAIBox"></div>
+        </div>
+      </div>
+
+      <!-- ══ WATCHLIST VIEW ══ -->
+      <div class="view" id="view-watchlist">
+        <div class="section-title">📋 Watchlist</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" id="wlTabs"></div>
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+          <input id="wlAddSym" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:var(--r);font-family:'IBM Plex Mono',monospace;font-size:13px;outline:none;width:150px" placeholder="เพิ่ม ticker..."
+            onkeydown="if(event.key==='Enter')addToCurrentWL()">
+          <button class="btn btn-ghost btn-sm" onclick="addToCurrentWL()">+ เพิ่ม</button>
+          <button class="btn btn-ghost btn-sm" onclick="refreshWL()">↻ รีเฟรช</button>
+          <button class="btn btn-ghost btn-sm" onclick="openCreateWL()">+ สร้าง Watchlist</button>
+        </div>
+        <div id="wlBody"><div class="placeholder"><div class="icon">📋</div><h3>เลือก Watchlist</h3></div></div>
+      </div>
+
+      <!-- ══ COMPARE VIEW ══ -->
+      <div class="view" id="view-compare">
+        <div class="section-title">⚖️ เปรียบเทียบหุ้น</div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+          <input id="cmpA" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 14px;border-radius:var(--r);font-family:'IBM Plex Mono',monospace;font-size:14px;outline:none;max-width:160px" placeholder="Ticker A เช่น NVDA">
+          <span style="color:var(--muted);font-size:18px">vs</span>
+          <input id="cmpB" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 14px;border-radius:var(--r);font-family:'IBM Plex Mono',monospace;font-size:14px;outline:none;max-width:160px" placeholder="Ticker B เช่น AMD">
+          <button class="btn btn-primary" onclick="runCompare()">เปรียบเทียบ</button>
+        </div>
+        <div id="cmpResult" style="display:none">
+          <div class="cmp-grid" id="cmpCards"></div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px">
+            <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">🤖 AI สรุปเปรียบเทียบ</div>
+            <div class="ai-box" id="cmpAIBox" style="min-height:100px"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- MODAL -->
+<div id="modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<script>
+// ══ STATE ══
+let state = {
+  portfolio: JSON.parse(localStorage.getItem('mega_portfolio') || '[]'),
+  watchlists: JSON.parse(localStorage.getItem('mega_watchlists') || '[]'),
+  activeWLId: null,
+};
+function saveState(){
+  localStorage.setItem('mega_portfolio', JSON.stringify(state.portfolio));
+  localStorage.setItem('mega_watchlists', JSON.stringify(state.watchlists));
+}
+
+let curSym='', curQuote=null, curHistory=[], curIndicators=null, curSignals=null, curFund=null;
+let curChartType='price', mainChart=null;
+
+// ══ INIT ══
+window.onload = () => {
+  updateMarketStatus();
+  setInterval(updateMarketStatus, 60000);
+  renderQuickChips();
+  renderPortList();
+  renderPortfolio();
+  renderWLTabs();
+  checkServerAI();
+};
+
+async function checkServerAI() {
+  try {
+    const r = await fetch('/api/health');
+    const d = await r.json();
+    document.getElementById('apiInfo').textContent = d.ok ? '✅ Server connected' : '⚠️ Server error';
+  } catch {
+    document.getElementById('apiInfo').textContent = '⚠️ ไม่สามารถเชื่อมต่อ server';
+  }
+}
+
+// ══ MARKET STATUS ══
+function updateMarketStatus() {
+  const et = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const d=et.getDay(), mins=et.getHours()*60+et.getMinutes(), wd=d>=1&&d<=5;
+  const dot=document.getElementById('mktDot'), lbl=document.getElementById('mktLabel');
+  if(wd&&mins>=570&&mins<960){dot.style.background='var(--up)';dot.classList.add('blink');lbl.textContent='ตลาด US เปิด';}
+  else if(wd&&mins>=240&&mins<570){dot.style.background='var(--warn)';dot.classList.remove('blink');lbl.textContent='Pre-Market';}
+  else if(wd&&mins>=960&&mins<1200){dot.style.background='var(--warn)';dot.classList.remove('blink');lbl.textContent='After Hours';}
+  else{dot.style.background='var(--down)';dot.classList.remove('blink');lbl.textContent='ตลาดปิด';}
+}
+
+// ══ NAV ══
+function switchView(name, el) {
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('view-'+name).classList.add('active');
+  if(el) el.classList.add('active');
+}
+function switchTab(el, id) {
+  el.closest('.tab-row').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  if(id==='tfund'&&curSym&&!curFund) loadFundamentals(curSym);
+  if(id==='tnews'&&curSym) loadNews(curSym);
+}
+function switchChart(type, el) {
+  curChartType=type;
+  document.querySelectorAll('.ctab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  if(curHistory.length) renderChart();
+}
+
+// ══ LOAD STOCK (calls /api/stock/:symbol) ══
+async function loadStock(sym) {
+  sym=(sym||'').trim().toUpperCase(); if(!sym) return;
+  curSym=sym;
+  document.getElementById('symInput').value=sym;
+  document.getElementById('stockPlaceholder').style.display='none';
+  document.getElementById('stockResult').style.display='none';
+  const ld=Object.assign(document.createElement('div'),{className:'loader',id:'stockLoader',innerHTML:'<div class="spin"></div> กำลังโหลด '+sym+'...'});
+  document.getElementById('view-stock').appendChild(ld);
+  try {
+    const r=await fetch('/api/stock/'+sym);
+    const data=await r.json();
+    if(!data.ok) throw new Error(data.error);
+    curQuote=data.quote; curHistory=data.history; curFund=null;
+    // recompute indicators client-side from history
+    curIndicators=computeIndicators(data.history);
+    curSignals=signalSummary(data.history,curIndicators);
+    // override signals with server-computed if available
+    if(data.signals) curSignals={...curSignals, ...data.signals,
+      sigs: data.signals.signals||curSignals.sigs,
+      bias: data.signals.overallBias||curSignals.bias,
+      bull: data.signals.bullCount??curSignals.bull,
+      bear: data.signals.bearCount??curSignals.bear,
+    };
+    renderStockResult();
+    loadNews(sym);
+  } catch(e) {
+    alert('ไม่พบข้อมูล '+sym+': '+e.message);
+  } finally { document.getElementById('stockLoader')?.remove(); }
+}
+function loadStockFromSearch(v){
+  v=v.trim().toUpperCase(); if(v){loadStock(v);switchView('stock',document.querySelector('[data-view="stock"]'));}
+  document.getElementById('sideSearch').value='';
+}
+
+// ══ RENDER STOCK ══
+function renderStockResult() {
+  const q=curQuote, sig=curSignals;
+  const up=q.change>=0, sign=up?'+':'';
+  document.getElementById('rTicker').textContent=q.symbol;
+  document.getElementById('rName').textContent=q.shortName+' · '+q.exchange;
+  document.getElementById('rPrice').textContent='$'+q.price.toFixed(2);
+  document.getElementById('rChg').innerHTML=`<span class="${up?'up':'down'}">${sign}$${q.change.toFixed(2)} (${sign}${q.changePct.toFixed(2)}%)</span>`;
+  document.getElementById('rBias').innerHTML=`<span class="bias-badge ${sig.bias}">${sig.bias}</span>`;
+  const earn=getEarningsDate(q.symbol);
+  document.getElementById('rEarn').innerHTML=earn?`<span class="earn-badge">📅 Earnings ~${earn}</span>`:'';
+  document.getElementById('signalsRow').innerHTML=sig.sigs.map(s=>`<span class="sig ${s.t||s.type}" title="${s.d||s.detail}">${s.l||s.label}</span>`).join('');
+  document.getElementById('statBar').innerHTML=[
+    ['Market Cap',fmtLarge(q.marketCap)],['Prev Close','$'+q.previousClose.toFixed(2)],
+    ['52W High','$'+q.week52High.toFixed(2)],['52W Low','$'+q.week52Low.toFixed(2)],
+    ['RSI(14)',sig.rsi?.toFixed(1)??'—'],['MA50',sig.ma50?'$'+sig.ma50.toFixed(2):'—'],
+    ['MA200',sig.ma200?'$'+sig.ma200.toFixed(2):'—'],
+  ].map(([l,v])=>`<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-val">${v}</div></div>`).join('');
+  document.getElementById('techGrid').innerHTML=[
+    ['RSI(14)',sig.rsi?.toFixed(1),rsiColor(sig.rsi)],
+    ['MA20',sig.ma20?'$'+sig.ma20.toFixed(2):'—',''],
+    ['MA50',sig.ma50?'$'+sig.ma50.toFixed(2):'—',''],
+    ['MA200',sig.ma200?'$'+sig.ma200.toFixed(2):'—',''],
+    ['Bull signals',sig.bull,'var(--up)'],['Bear signals',sig.bear,'var(--down)'],
+    ['52W High','$'+curQuote.week52High.toFixed(2),''],['52W Low','$'+curQuote.week52Low.toFixed(2),''],
+  ].map(([l,v,c])=>`<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-val" style="color:${c||'var(--text)'}">${v??'—'}</div></div>`).join('');
+  document.getElementById('aiBox').innerHTML='<span style="color:var(--muted)">กด "AI วิเคราะห์" เพื่อรับการวิเคราะห์ streaming ภาษาไทย...</span>';
+  document.getElementById('stockResult').style.display='block';
+  renderChart();
+  document.querySelectorAll('.port-row').forEach(r=>r.classList.toggle('active',r.dataset.sym===curSym));
+}
+
+const EARN_MAP={'MU':'~24 มิ.ย. 2026','NVDA':'~Aug 2026','INTC':'~23 ก.ค. 2026','AVGO':'~3 ก.ย. 2026','AAPL':'~Jul 2026','GOOG':'~Jul 2026','GOOGL':'~Jul 2026','TSM':'~Jul 2026'};
+const getEarningsDate=s=>EARN_MAP[s]||null;
+function rsiColor(r){if(!r)return '';if(r>70)return 'var(--down)';if(r<30)return 'var(--up)';return 'var(--warn)';}
+
+// ══ CHART ══
+function renderChart() {
+  if(mainChart){mainChart.destroy();mainChart=null;}
+  const ctx=document.getElementById('mainChart').getContext('2d');
+  const hist=curHistory, ind=curIndicators, labels=hist.map(d=>d.date);
+  const base={responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:'#7d8590',font:{size:11}}},tooltip:{mode:'index',intersect:false,backgroundColor:'#1c2128',borderColor:'#30363d',borderWidth:1,titleColor:'#e6edf3',bodyColor:'#8b949e'}},
+    scales:{x:{ticks:{color:'#7d8590',maxTicksLimit:8,font:{size:10}},grid:{color:'#21262d'}},y:{ticks:{color:'#7d8590',font:{size:11}},grid:{color:'#21262d'}}}};
+  if(curChartType==='price'){
+    mainChart=new Chart(ctx,{type:'line',data:{labels,datasets:[
+      {label:'Price',data:hist.map(d=>d.close),borderColor:'#f0b429',borderWidth:2,pointRadius:0,fill:false,tension:0},
+      {label:'MA20',data:ind.ma20,borderColor:'#388bfd',borderWidth:1.5,pointRadius:0,fill:false},
+      {label:'MA50',data:ind.ma50,borderColor:'#3fb950',borderWidth:1.5,pointRadius:0,fill:false},
+      {label:'MA200',data:ind.ma200,borderColor:'#f85149',borderWidth:1.5,pointRadius:0,fill:false},
+    ]},options:{...base}});
+  } else if(curChartType==='rsi'){
+    mainChart=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'RSI(14)',data:ind.rsi14,borderColor:'#8957e5',borderWidth:2,pointRadius:0,fill:false}]},options:{...base,scales:{...base.scales,y:{...base.scales.y,min:0,max:100}}}});
+  } else if(curChartType==='macd'){
+    const bc=ind.macd.hist.map(v=>v>=0?'rgba(63,185,80,.6)':'rgba(248,81,73,.6)');
+    mainChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[
+      {type:'bar',label:'Histogram',data:ind.macd.hist,backgroundColor:bc,borderWidth:0},
+      {type:'line',label:'MACD',data:ind.macd.macd,borderColor:'#388bfd',borderWidth:1.5,pointRadius:0},
+      {type:'line',label:'Signal',data:ind.macd.signal,borderColor:'#f0b429',borderWidth:1.5,pointRadius:0},
+    ]},options:{...base}});
+  } else if(curChartType==='bb'){
+    mainChart=new Chart(ctx,{type:'line',data:{labels,datasets:[
+      {label:'Price',data:hist.map(d=>d.close),borderColor:'#f0b429',borderWidth:2,pointRadius:0,fill:false},
+      {label:'Upper',data:ind.bb.upper,borderColor:'rgba(248,81,73,.5)',borderWidth:1,pointRadius:0,fill:false,borderDash:[4,2]},
+      {label:'Middle',data:ind.bb.mid,borderColor:'rgba(125,133,144,.5)',borderWidth:1,pointRadius:0,fill:false},
+      {label:'Lower',data:ind.bb.lower,borderColor:'rgba(63,185,80,.5)',borderWidth:1,pointRadius:0,fill:false,borderDash:[4,2]},
+    ]},options:{...base}});
+  } else {
+    mainChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Volume',data:ind.volumes,backgroundColor:'rgba(56,139,253,.45)',borderWidth:0}]},options:{...base}});
+  }
+}
+
+// ══ TECHNICAL INDICATORS ══
+function sma(a,n){return a.map((_,i)=>{if(i<n-1)return null;return a.slice(i-n+1,i+1).reduce((s,v)=>s+v,0)/n;});}
+function ema(a,n){const k=2/(n+1),r=new Array(a.length).fill(null);let s=a.slice(0,n).reduce((x,v)=>x+v,0)/n;r[n-1]=s;for(let i=n;i<a.length;i++){s=a[i]*k+s*(1-k);r[i]=s;}return r;}
+function rsiCalc(a,n=14){const r=new Array(a.length).fill(null);let g=0,l=0;for(let i=1;i<=n;i++){const d=a[i]-a[i-1];if(d>0)g+=d;else l-=d;}let ag=g/n,al=l/n;r[n]=100-100/(1+ag/(al||.001));for(let i=n+1;i<a.length;i++){const d=a[i]-a[i-1];ag=(ag*(n-1)+Math.max(d,0))/n;al=(al*(n-1)+Math.max(-d,0))/n;r[i]=100-100/(1+ag/(al||.001));}return r;}
+function macdCalc(a){const f=ema(a,12),s=ema(a,26),mv=a.map((_,i)=>f[i]!=null&&s[i]!=null?f[i]-s[i]:null);const si=mv.findIndex(v=>v!=null),sr=ema(mv.slice(si),9),sig=new Array(a.length).fill(null);sr.forEach((v,i)=>sig[si+i]=v);return{macd:mv,signal:sig,hist:mv.map((v,i)=>v!=null&&sig[i]!=null?v-sig[i]:null)};}
+function bbCalc(a,n=20,m=2){const mid=sma(a,n);return{upper:mid.map((v,i)=>{if(!v)return null;const s=Math.sqrt(a.slice(i-n+1,i+1).reduce((x,c)=>x+(c-v)**2,0)/n);return v+m*s;}),mid,lower:mid.map((v,i)=>{if(!v)return null;const s=Math.sqrt(a.slice(i-n+1,i+1).reduce((x,c)=>x+(c-v)**2,0)/n);return v-m*s;});};}
+function computeIndicators(hist){const cl=hist.map(d=>d.close);return{ma20:sma(cl,20),ma50:sma(cl,50),ma200:sma(cl,200),rsi14:rsiCalc(cl),macd:macdCalc(cl),bb:bbCalc(cl),volumes:hist.map(d=>d.volume)};}
+function signalSummary(hist,ind){
+  const last=a=>{for(let i=a.length-1;i>=0;i--)if(a[i]!=null)return a[i];return null;};
+  const price=hist[hist.length-1]?.close,r=last(ind.rsi14),ma20=last(ind.ma20),ma50=last(ind.ma50),ma200=last(ind.ma200),m=last(ind.macd.macd),sig=last(ind.macd.signal),bbU=last(ind.bb.upper),bbL=last(ind.bb.lower);
+  const sigs=[];
+  if(price>ma200)sigs.push({t:'bullish',l:'Above MA200',d:'Long-term uptrend'});else sigs.push({t:'bearish',l:'Below MA200',d:'Long-term downtrend'});
+  if(ma50&&ma200){if(ma50>ma200)sigs.push({t:'bullish',l:'Golden Cross',d:'MA50>MA200'});else sigs.push({t:'bearish',l:'Death Cross',d:'MA50<MA200'});}
+  if(r>70)sigs.push({t:'bearish',l:`RSI Overbought(${r.toFixed(0)})`,d:''});
+  else if(r<30)sigs.push({t:'bullish',l:`RSI Oversold(${r.toFixed(0)})`,d:''});
+  else sigs.push({t:'neutral',l:`RSI ${r?.toFixed(0)}`,d:''});
+  if(m&&sig){if(m>sig)sigs.push({t:'bullish',l:'MACD Bullish',d:''});else sigs.push({t:'bearish',l:'MACD Bearish',d:''});}
+  if(bbU&&price>=bbU)sigs.push({t:'bearish',l:'BB Upper',d:''});else if(bbL&&price<=bbL)sigs.push({t:'bullish',l:'BB Lower',d:''});
+  const bull=sigs.filter(s=>s.t==='bullish').length,bear=sigs.filter(s=>s.t==='bearish').length;
+  return{sigs,bias:bull>bear?'BULLISH':bear>bull?'BEARISH':'NEUTRAL',bull,bear,rsi:r,ma20,ma50,ma200};
+}
+
+// ══ FUNDAMENTALS (via /api/stock/:sym/fundamentals) ══
+async function loadFundamentals(sym) {
+  document.getElementById('fundGrid').innerHTML='<div class="loader"><div class="spin"></div> โหลด fundamentals...</div>';
+  try {
+    const r=await fetch('/api/stock/'+sym+'/fundamentals');
+    const d=await r.json(); if(!d.ok)throw new Error(d.error);
+    curFund=d.data; renderFundamentals(d.data);
+  } catch(e){document.getElementById('fundGrid').innerHTML=`<p style="color:var(--down);padding:20px">${e.message}</p>`;}
+}
+function renderFundamentals(f){
+  const pct=v=>v!=null?(v*100).toFixed(2)+'%':'—',fmt=v=>v!=null?v.toFixed(2):'—';
+  const sec=(title,rows)=>`<div><div class="fund-section-title">${title}</div>${rows.map(([k,v,c])=>`<div class="fund-row"><span class="fk">${k}</span><span class="fv" style="color:${c||'var(--text)'}">${v??'—'}</span></div>`).join('')}</div>`;
+  document.getElementById('fundGrid').innerHTML=
+    sec('📊 Valuation',[['P/E(TTM)',fmt(f.trailingPE)],['P/E(Fwd)',fmt(f.forwardPE)],['P/B',fmt(f.priceToBook)],['PEG',fmt(f.pegRatio)],['EPS(TTM)','$'+fmt(f.trailingEps)],['EPS(Fwd)','$'+fmt(f.forwardEps)]])+
+    sec('💹 Profitability',[['Gross Margin',pct(f.grossMargins),f.grossMargins>.5?'var(--up)':''],['Op Margin',pct(f.operatingMargins)],['Net Margin',pct(f.profitMargins),f.profitMargins>.2?'var(--up)':''],['ROE',pct(f.returnOnEquity),f.returnOnEquity>.15?'var(--up)':''],['ROA',pct(f.returnOnAssets)]])+
+    sec('📈 Growth',[['Revenue Growth',pct(f.revenueGrowth),f.revenueGrowth>0?'var(--up)':'var(--down)'],['Earnings Growth',pct(f.earningsGrowth),f.earningsGrowth>0?'var(--up)':'var(--down)'],['Total Revenue',fmtLarge(f.totalRevenue)]])+
+    sec('🏦 Balance Sheet',[['Debt/Equity',fmt(f.debtToEquity),f.debtToEquity<1?'var(--up)':f.debtToEquity>2?'var(--down)':''],['Current Ratio',fmt(f.currentRatio),f.currentRatio>1.5?'var(--up)':'var(--warn)'],['Total Cash',fmtLarge(f.totalCash)],['Total Debt',fmtLarge(f.totalDebt)]])+
+    sec('💰 Dividends',[['Dividend Yield',pct(f.dividendYield)],['Payout Ratio',pct(f.payoutRatio)]])+
+    sec('🎯 Analyst',[['Rating',f.recommendationKey?.toUpperCase(),f.recommendationKey==='buy'||f.recommendationKey==='strong_buy'?'var(--up)':''],['# Analysts',f.numberOfAnalystOpinions],['Target(Mean)',f.targetMeanPrice?'$'+f.targetMeanPrice.toFixed(2):null],['Target(High)',f.targetHighPrice?'$'+f.targetHighPrice.toFixed(2):null,'var(--up)'],['Target(Low)',f.targetLowPrice?'$'+f.targetLowPrice.toFixed(2):null,'var(--down)']]);
+  // EPS history
+  if(f.epsHistory?.length){
+    document.getElementById('fundGrid').innerHTML+=`<div style="grid-column:1/-1"><div class="fund-section-title">📅 EPS History</div><table style="width:100%;border-collapse:collapse"><thead><tr>${['Quarter','Actual','Estimate','Surprise'].map(h=>`<th style="text-align:left;padding:6px;font-size:10px;color:var(--muted);border-bottom:1px solid var(--border)">${h}</th>`).join('')}</tr></thead><tbody>${f.epsHistory.map(e=>`<tr><td class="mono" style="padding:6px;color:var(--muted)">${e.quarter}</td><td class="mono" style="padding:6px">${e.epsActual?.toFixed(2)??'—'}</td><td class="mono" style="padding:6px;color:var(--muted)">${e.epsEstimate?.toFixed(2)??'—'}</td><td class="mono ${e.surprisePercent>=0?'up':'down'}" style="padding:6px">${e.surprisePercent?.toFixed(1)??'—'}%</td></tr>`).join('')}</tbody></table></div>`;
+  }
+}
+
+// ══ NEWS (via /api/stock/:sym/news) ══
+async function loadNews(sym){
+  const box=document.getElementById('newsBox'); if(!box)return;
+  box.innerHTML='<div class="loader"><div class="spin"></div> โหลดข่าว...</div>';
+  try{
+    const r=await fetch('/api/stock/'+sym+'/news');
+    const d=await r.json(); if(!d.ok)throw new Error(d.error);
+    if(!d.news.length){box.innerHTML='<p style="color:var(--muted);padding:20px">ไม่พบข่าว</p>';return;}
+    box.innerHTML=d.news.map(n=>`<div class="news-item"><div class="news-title"><a href="${n.link}" target="_blank">${n.title}</a></div><div class="news-meta">${n.pubDate?new Date(n.pubDate).toLocaleString('th-TH'):'—'}</div>${n.description?`<div class="news-desc">${n.description}...</div>`:''}</div>`).join('');
+  }catch(e){box.innerHTML=`<p style="color:var(--down);padding:20px">${e.message}</p>`;}
+}
+
+// ══ AI  (via /api/ai/*  — backend streams with server-side key) ══
+async function streamBackend(endpoint, body, outputEl){
+  outputEl.innerHTML='<span class="cursor-blink"></span>';
+  const res=await fetch('/api/ai/'+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok){outputEl.textContent='Server error '+res.status;return;}
+  let text=''; outputEl.textContent='';
+  const reader=res.body.getReader(),dec=new TextDecoder();
+  while(true){
+    const{done,value}=await reader.read();if(done)break;
+    for(const line of dec.decode(value).split('\n')){
+      if(!line.startsWith('data:'))continue;
+      const raw=line.slice(5).trim();if(raw==='[DONE]')return;
+      try{const d=JSON.parse(raw);if(d.text){text+=d.text;outputEl.innerHTML=md2html(text)+'<span class="cursor-blink"></span>';outputEl.scrollTop=outputEl.scrollHeight;}}catch{}
+    }
+  }
+  outputEl.innerHTML=md2html(text);
+}
+
+async function runStockAI(){
+  if(!curQuote)return;
+  // load fund if not yet
+  if(!curFund){try{const r=await fetch('/api/stock/'+curSym+'/fundamentals');const d=await r.json();if(d.ok)curFund=d.data;}catch{}}
+  // load news
+  let news=[];try{const r=await fetch('/api/stock/'+curSym+'/news');const d=await r.json();if(d.ok)news=d.news;}catch{}
+  await streamBackend('analyze',{symbol:curSym,quote:curQuote,signals:{overallBias:curSignals.bias,bullCount:curSignals.bull,bearCount:curSignals.bear,rsi:curSignals.rsi,ma20:curSignals.ma20,ma50:curSignals.ma50,ma200:curSignals.ma200,signals:curSignals.sigs.map(s=>({label:s.l||s.label,detail:s.d||s.detail}))},fundamentals:curFund,history:curHistory.slice(-30),news},document.getElementById('aiBox'));
+}
+
+async function runPortfolioAI(){
+  if(!state.portfolio.length||!window._portData){alert('รอข้อมูลราคาโหลดก่อนครับ');return;}
+  const{rows,totalValue,totalGainPct}=window._portData;
+  document.getElementById('portAIWrap').style.display='block';
+  await streamBackend('portfolio',{holdings:rows.map(h=>({symbol:h.symbol,shortName:h.name,shares:h.shares,avgCost:h.avgCost,currentPrice:h.price,gainPct:h.gainPct,weight:(h.value/totalValue)*100})),totalValue,totalGainPct},document.getElementById('portAIBox'));
+}
+
+async function runCompare(){
+  const sA=document.getElementById('cmpA').value.trim().toUpperCase();
+  const sB=document.getElementById('cmpB').value.trim().toUpperCase();
+  if(!sA||!sB)return;
+  document.getElementById('cmpResult').style.display='block';
+  document.getElementById('cmpCards').innerHTML='<div class="loader"><div class="spin"></div> โหลด...</div>';
+  const[rA,rB,fA,fB]=await Promise.all([
+    fetch('/api/stock/'+sA).then(r=>r.json()).catch(()=>({ok:false})),
+    fetch('/api/stock/'+sB).then(r=>r.json()).catch(()=>({ok:false})),
+    fetch('/api/stock/'+sA+'/fundamentals').then(r=>r.json()).catch(()=>({ok:false})),
+    fetch('/api/stock/'+sB+'/fundamentals').then(r=>r.json()).catch(()=>({ok:false})),
+  ]);
+  if(!rA.ok||!rB.ok){alert('โหลดข้อมูลไม่สำเร็จ');return;}
+  const sigA=signalSummary(rA.history,computeIndicators(rA.history));
+  const sigB=signalSummary(rB.history,computeIndicators(rB.history));
+  const cmpCard=(q,f,sig)=>`<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px">
+    <div class="stock-ticker-big" style="font-size:20px">${q.symbol}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${q.shortName}</div>
+    <div class="price-big" style="font-size:22px;margin-bottom:4px">$${q.price.toFixed(2)}</div>
+    <div class="${q.change>=0?'up':'down'}" style="font-size:13px;margin-bottom:8px">${q.change>=0?'+':''}${q.changePct.toFixed(2)}%</div>
+    <span class="bias-badge ${sig.bias}" style="margin-bottom:10px;display:inline-block">${sig.bias}</span>
+    ${[['P/E(Fwd)',f?.data?.forwardPE?.toFixed(1)],['Rev Growth',f?.data?.revenueGrowth!=null?(f.data.revenueGrowth*100).toFixed(1)+'%':null],['Net Margin',f?.data?.profitMargins!=null?(f.data.profitMargins*100).toFixed(1)+'%':null],['ROE',f?.data?.returnOnEquity!=null?(f.data.returnOnEquity*100).toFixed(1)+'%':null],['Target',f?.data?.targetMeanPrice?'$'+f.data.targetMeanPrice.toFixed(2):null],['RSI',sig.rsi?.toFixed(0)]].map(([k,v])=>`<div class="fund-row"><span class="fk">${k}</span><span class="fv">${v??'—'}</span></div>`).join('')}
+  </div>`;
+  document.getElementById('cmpCards').innerHTML=cmpCard(rA.quote,fA,sigA)+cmpCard(rB.quote,fB,sigB);
+  await streamBackend('compare',{stockA:{symbol:sA,quote:rA.quote,signals:{overallBias:sigA.bias,rsi:sigA.rsi},fund:fA.data},stockB:{symbol:sB,quote:rB.quote,signals:{overallBias:sigB.bias,rsi:sigB.rsi},fund:fB.data}},document.getElementById('cmpAIBox'));
+}
+
+// ══ PORTFOLIO ══
+function renderPortfolio(){
+  if(!state.portfolio.length){
+    document.getElementById('portBody').innerHTML='<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--muted)">ยังไม่มี — กด "+ เพิ่มหุ้น"</td></tr>';
+    document.getElementById('portSummary').innerHTML='';
+    document.getElementById('portAIWrap').style.display='none';
+    return;
+  }
+  document.getElementById('portBody').innerHTML='<tr><td colspan="9"><div class="loader"><div class="spin"></div> กำลังโหลดราคา...</div></td></tr>';
+  fetch('/api/stock/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols:state.portfolio.map(h=>h.symbol)})})
+  .then(r=>r.json()).then(data=>{
+    if(!data.ok)throw new Error(data.error);
+    const pm={};data.data.forEach(q=>pm[q.symbol]=q);
+    let tv=0,tc=0;
+    const rows=state.portfolio.map(h=>{
+      const lv=pm[h.symbol],price=lv?.regularMarketPrice??h.avgCost,value=price*h.shares,cost=h.avgCost*h.shares,gain=value-cost,gainPct=(gain/cost)*100;
+      tv+=value;tc+=cost;
+      return{...h,price,value,gain,gainPct,name:lv?.shortName??h.symbol};
+    });
+    const tg=tv-tc,tgp=(tg/tc)*100;
+    window._portData={rows,totalValue:tv,totalGainPct:tgp};
+    document.getElementById('portSummary').innerHTML=[['💵 มูลค่าพอร์ต','$'+tv.toFixed(2),''],['📈 กำไร/ขาดทุน',(tg>=0?'+$':'–$')+Math.abs(tg).toFixed(2),tg>=0?'var(--up)':'var(--down)'],['📊 ผลตอบแทน',(tgp>=0?'+':'')+tgp.toFixed(2)+'%',tgp>=0?'var(--up)':'var(--down)'],['📦 Holdings',state.portfolio.length+' ตัว','']].map(([l,v,c])=>`<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-val" style="color:${c||'var(--text)'}">${v}</div></div>`).join('');
+    document.getElementById('portBody').innerHTML=rows.map(h=>`<tr>
+      <td class="mono" style="font-weight:600;color:var(--accent);cursor:pointer" onclick="loadStock('${h.symbol}');switchView('stock',document.querySelector('[data-view=stock]'))">${h.symbol}</td>
+      <td style="color:var(--muted);font-size:12px">${h.name}</td>
+      <td class="mono">$${h.price.toFixed(2)}</td>
+      <td class="mono">$${h.avgCost.toFixed(2)}</td>
+      <td class="mono">${h.shares}</td>
+      <td class="mono">$${h.value.toFixed(2)}</td>
+      <td class="mono ${h.gain>=0?'up':'down'}">${h.gain>=0?'+':''}$${h.gain.toFixed(2)}<br><small>${h.gainPct>=0?'+':''}${h.gainPct.toFixed(2)}%</small></td>
+      <td style="min-width:80px"><div style="font-size:10px;color:var(--muted);margin-bottom:2px">${((h.value/tv)*100).toFixed(1)}%</div><div class="pbar-wrap"><div class="pbar-fill" style="width:${(h.value/tv)*100}%"></div></div></td>
+      <td><button class="btn btn-ghost btn-sm" style="padding:3px 8px" onclick="removeHolding('${h.symbol}')">✕</button></td>
+    </tr>`).join('');
+    document.getElementById('portAIWrap').style.display='block';
+    document.getElementById('portAIBox').innerHTML='<span style="color:var(--muted)">กด "AI วิเคราะห์พอร์ต" เพื่อรับคำแนะนำ...</span>';
+  }).catch(e=>document.getElementById('portBody').innerHTML=`<tr><td colspan="9" style="color:var(--down);padding:20px">${e.message}</td></tr>`);
+  renderPortList();
+}
+function openAddHolding(){showModal(`<h3>เพิ่มหุ้นใน Portfolio</h3><input id="hSym" placeholder="Ticker เช่น NVDA" style="text-transform:uppercase"><input id="hShares" type="number" placeholder="จำนวนหุ้น" min="0.0001" step="0.0001"><input id="hCost" type="number" placeholder="ราคาต้นทุนเฉลี่ย ($)" min="0.01" step="0.01"><div class="modal-actions"><button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button><button class="btn btn-primary btn-sm" onclick="saveHolding()">เพิ่ม</button></div>`);}
+function saveHolding(){const sym=document.getElementById('hSym').value.trim().toUpperCase(),shares=parseFloat(document.getElementById('hShares').value),avgCost=parseFloat(document.getElementById('hCost').value);if(!sym||!shares||!avgCost){alert('กรอกให้ครบ');return;}state.portfolio=state.portfolio.filter(h=>h.symbol!==sym);state.portfolio.push({symbol:sym,shares,avgCost});saveState();closeModal();renderPortfolio();renderQuickChips();}
+function removeHolding(sym){state.portfolio=state.portfolio.filter(h=>h.symbol!==sym);saveState();renderPortfolio();renderQuickChips();}
+function addToPortfolioPrompt(){if(!curSym)return;showModal(`<h3>เพิ่ม ${curSym} ใน Portfolio</h3><input id="ppS" type="number" placeholder="จำนวนหุ้น" step="0.0001"><input id="ppC" type="number" placeholder="ราคาต้นทุน ($)" step="0.01"><div class="modal-actions"><button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button><button class="btn btn-primary btn-sm" onclick="savePAI()">เพิ่ม</button></div>`);}
+function savePAI(){const s=parseFloat(document.getElementById('ppS').value),c=parseFloat(document.getElementById('ppC').value);if(!s||!c){alert('กรอกให้ครบ');return;}state.portfolio=state.portfolio.filter(h=>h.symbol!==curSym);state.portfolio.push({symbol:curSym,shares:s,avgCost:c});saveState();closeModal();renderPortfolio();renderQuickChips();}
+
+// ══ WATCHLIST ══
+function renderWLTabs(){const el=document.getElementById('wlTabs');el.innerHTML=state.watchlists.map(wl=>`<span class="wl-chip ${state.activeWLId===wl.id?'active':''}" onclick="selectWL('${wl.id}')">${wl.name} <small style="color:var(--dim)">(${wl.symbols.length})</small></span>`).join('');}
+function selectWL(id){state.activeWLId=id;renderWLTabs();loadWLData();}
+function openCreateWL(){showModal(`<h3>สร้าง Watchlist ใหม่</h3><input id="wlN" placeholder="ชื่อ เช่น AI Stocks" autofocus><div class="modal-actions"><button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button><button class="btn btn-primary btn-sm" onclick="createWL()">สร้าง</button></div>`);setTimeout(()=>document.getElementById('wlN')?.focus(),50);}
+function createWL(){const name=document.getElementById('wlN').value.trim();if(!name)return;const wl={id:Date.now()+'',name,symbols:[]};state.watchlists.push(wl);saveState();state.activeWLId=wl.id;closeModal();renderWLTabs();loadWLData();}
+function addToCurrentWL(){const sym=document.getElementById('wlAddSym').value.trim().toUpperCase();if(!sym||!state.activeWLId)return;const wl=state.watchlists.find(w=>w.id===state.activeWLId);if(wl&&!wl.symbols.includes(sym)){wl.symbols.push(sym);saveState();}document.getElementById('wlAddSym').value='';renderWLTabs();loadWLData();}
+function removeFromWL(sym){const wl=state.watchlists.find(w=>w.id===state.activeWLId);if(wl){wl.symbols=wl.symbols.filter(s=>s!==sym);saveState();renderWLTabs();loadWLData();}}
+function refreshWL(){loadWLData();}
+async function loadWLData(){
+  const wl=state.watchlists.find(w=>w.id===state.activeWLId);
+  if(!wl){document.getElementById('wlBody').innerHTML='<div class="placeholder"><div class="icon">📋</div><h3>เลือก Watchlist</h3></div>';return;}
+  if(!wl.symbols.length){document.getElementById('wlBody').innerHTML='<p style="color:var(--muted);padding:20px">ยังไม่มีหุ้น</p>';return;}
+  document.getElementById('wlBody').innerHTML='<div class="loader"><div class="spin"></div> กำลังโหลด...</div>';
+  try{
+    const r=await fetch('/api/stock/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols:wl.symbols})});
+    const d=await r.json();if(!d.ok)throw new Error(d.error);
+    const pm={};d.data.forEach(q=>pm[q.symbol]=q);
+    document.getElementById('wlBody').innerHTML=`<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">${wl.symbols.map(sym=>{const q=pm[sym],pct=q?.regularMarketChangePercent??0;return`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer" onclick="loadStock('${sym}');switchView('stock',document.querySelector('[data-view=stock]'))"><span class="port-sym" style="width:60px">${sym}</span><span style="flex:1;font-size:12px;color:var(--muted)">${q?.shortName??'—'}</span><span class="port-sym" style="width:80px;text-align:right">$${q?.regularMarketPrice?.toFixed(2)??'—'}</span><span class="port-chg ${pct>=0?'up':'down'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span><button class="btn btn-ghost btn-sm" style="padding:3px 8px;margin-left:4px" onclick="event.stopPropagation();removeFromWL('${sym}')">✕</button></div>`}).join('')}</div>`;
+  }catch(e){document.getElementById('wlBody').innerHTML=`<p style="color:var(--down);padding:20px">${e.message}</p>`;}
+}
+function addToWatchlistPrompt(){if(!curSym)return;if(!state.watchlists.length){openCreateWL();return;}showModal(`<h3>เพิ่ม ${curSym} ใน Watchlist</h3><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${state.watchlists.map(wl=>`<span class="wl-chip" style="cursor:pointer" onclick="addSymToWL('${wl.id}','${curSym}')">${wl.name}</span>`).join('')}</div><div class="modal-actions"><button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button></div>`);}
+function addSymToWL(id,sym){const wl=state.watchlists.find(w=>w.id===id);if(wl&&!wl.symbols.includes(sym)){wl.symbols.push(sym);saveState();renderWLTabs();}closeModal();}
+
+// ══ SIDEBAR PORT LIST ══
+function renderPortList(){
+  const el=document.getElementById('portList');
+  if(!state.portfolio.length){el.innerHTML='<div style="padding:8px;font-size:12px;color:var(--dim)">ยังไม่มี — เพิ่มใน Portfolio</div>';return;}
+  el.innerHTML=state.portfolio.map(h=>`<div class="port-row ${curSym===h.symbol?'active':''}" data-sym="${h.symbol}" onclick="loadStock('${h.symbol}');switchView('stock',document.querySelector('[data-view=stock]'))"><span class="port-sym">${h.symbol}</span><span class="port-name" id="pn-${h.symbol}">—</span><span class="port-chg neutral" id="pc-${h.symbol}">—</span></div>`).join('');
+  fetch('/api/stock/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols:state.portfolio.map(h=>h.symbol)})})
+  .then(r=>r.json()).then(d=>{if(!d.ok)return;d.data.forEach(q=>{const pct=q.regularMarketChangePercent??0;const e1=document.getElementById('pn-'+q.symbol),e2=document.getElementById('pc-'+q.symbol);if(e1)e1.textContent='$'+q.regularMarketPrice?.toFixed(2);if(e2){e2.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';e2.className='port-chg '+(pct>=0?'up':'down');}});}).catch(()=>{});
+}
+function filterPortList(q){q=q.toUpperCase();document.querySelectorAll('.port-row').forEach(r=>r.style.display=(!q||r.dataset.sym.includes(q))?'':'none');}
+
+// ══ QUICK CHIPS ══
+function renderQuickChips(){
+  const defaults=['NVDA','AAPL','TSM','GOOG','AVGO','MU','ASML','INTC'];
+  const syms=state.portfolio.length?state.portfolio.map(h=>h.symbol):defaults;
+  document.getElementById('quickChips').innerHTML=syms.map(s=>`<button onclick="loadStock('${s}')" style="padding:4px 12px;border-radius:16px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer">${s}</button>`).join('');
+}
+
+// ══ MODAL ══
+function showModal(html){document.getElementById('modalContent').innerHTML=html;document.getElementById('modal').style.display='flex';}
+function closeModal(){document.getElementById('modal').style.display='none';}
+
+// ══ HELPERS ══
+function fmtLarge(n){if(!n)return'—';if(n>=1e12)return'$'+(n/1e12).toFixed(2)+'T';if(n>=1e9)return'$'+(n/1e9).toFixed(2)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(2)+'M';return'$'+n.toFixed(2);}
+function md2html(t){return t.replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/^[-•] (.+)$/gm,'<div style="margin-left:12px;margin-bottom:3px">• $1</div>').replace(/\n{2,}/g,'</p><p>').replace(/^(?!<[h|d|p])(.+)$/gm,'<p>$1</p>');}
+</script>
+</body>
+</html>
