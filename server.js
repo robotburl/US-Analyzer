@@ -55,12 +55,28 @@ app.get('/api/debug/:symbol', async (req, res) => {
     result.tests.alpha_vantage = { ok: keys.length > 0, days: keys.length, latest: keys[0], note: d.Note || d.Information || null };
   } catch(e) { result.tests.alpha_vantage = { ok: false, error: e.message }; }
 
-  // Test full stock route (history)
+  // Test avHistory directly
+  try {
+    const AV = 'https://www.alphavantage.co/query';
+    const url = `${AV}?function=TIME_SERIES_DAILY&symbol=${sym}&outputsize=compact&apikey=${process.env.ALPHA_VANTAGE_KEY}`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const ts = d['Time Series (Daily)'];
+    const note = d['Note'] || d['Information'] || null;
+    result.tests.av_direct = {
+      ok: !!ts,
+      days: ts ? Object.keys(ts).length : 0,
+      note,
+      keys: Object.keys(d),
+    };
+  } catch(e) { result.tests.av_direct = { ok: false, error: e.message }; }
   try {
     const { getQuote } = await import('./services/yahoo.js');
     const q = await getQuote(sym);
     result.tests.stock_history = { ok: q.history.length > 0, days: q.history.length, first: q.history[0]?.date, last: q.history.at(-1)?.date };
-  } catch(e) { result.tests.stock_history = { ok: false, error: e.message }; }
+  } catch(e) {
+    result.tests.stock_history = { ok: false, days: 0, error: e.message, stack: e.stack?.split('\n').slice(0,3) };
+  }
 
   res.json(result);
 });
