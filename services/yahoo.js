@@ -40,7 +40,10 @@ export async function getQuote(symbol) {
         outputsize: 'full',
         datatype: 'json',
       });
+      console.log('[AV] keys:', Object.keys(av));
       const ts = av['Time Series (Daily)'];
+      const note = av['Note'] || av['Information'] || null;
+      if (note) console.warn('[AV] rate limit note:', note);
       if (ts) {
         history = Object.entries(ts)
           .map(([date, v]) => ({
@@ -53,9 +56,12 @@ export async function getQuote(symbol) {
           }))
           .sort((a, b) => a.date.localeCompare(b.date))
           .slice(-252);
+        console.log('[AV] history days:', history.length, '| last:', history.at(-1)?.date);
+      } else {
+        console.warn('[AV] no Time Series data, response:', JSON.stringify(av).slice(0, 200));
       }
     } catch(e) {
-      console.warn('AV history failed:', e.message);
+      console.warn('[AV] history failed:', e.message);
     }
   }
 
