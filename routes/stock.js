@@ -4,7 +4,7 @@ import { computeIndicators, getSignalSummary } from '../services/technicals.js';
 
 const router = Router();
 
-// GET /api/stock/:symbol — full data (quote + technicals)
+// GET /api/stock/:symbol
 router.get('/:symbol', async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
@@ -15,38 +15,39 @@ router.get('/:symbol', async (req, res) => {
     res.json({
       ok: true,
       quote: {
-        symbol: quote.symbol,
-        shortName: quote.shortName,
-        currency: quote.currency,
-        exchange: quote.exchange,
-        price: quote.regularMarketPrice,
-        change: quote.regularMarketChange,
-        changePct: quote.regularMarketChangePercent,
+        symbol:        quote.symbol,
+        shortName:     quote.shortName,
+        currency:      quote.currency,
+        exchange:      quote.exchange,
+        price:         quote.price,
+        change:        quote.change,
+        changePct:     quote.changePct,
         previousClose: quote.previousClose,
-        marketCap: quote.marketCap,
-        week52High: quote.fiftyTwoWeekHigh,
-        week52Low: quote.fiftyTwoWeekLow,
+        marketCap:     quote.marketCap,
+        week52High:    quote.week52High,
+        week52Low:     quote.week52Low,
       },
-      history: quote.history.slice(-252), // ~1 year trading days
+      history: quote.history.slice(-252),
       indicators: {
-        ma20: indicators.ma20.slice(-252),
-        ma50: indicators.ma50.slice(-252),
+        ma20:  indicators.ma20.slice(-252),
+        ma50:  indicators.ma50.slice(-252),
         ma200: indicators.ma200.slice(-252),
         rsi14: indicators.rsi14.slice(-252),
         macd: {
-          macd: indicators.macd.macd.slice(-252),
-          signal: indicators.macd.signal.slice(-252),
+          macd:      indicators.macd.macd.slice(-252),
+          signal:    indicators.macd.signal.slice(-252),
           histogram: indicators.macd.histogram.slice(-252),
         },
         bollingerBands: {
           upper: indicators.bollingerBands.upper.slice(-252),
-          mid: indicators.bollingerBands.mid.slice(-252),
+          mid:   indicators.bollingerBands.mid.slice(-252),
           lower: indicators.bollingerBands.lower.slice(-252),
         },
       },
       signals,
     });
   } catch (err) {
+    console.error(`[stock] ${req.params.symbol}:`, err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -58,6 +59,7 @@ router.get('/:symbol/fundamentals', async (req, res) => {
     const data = await getFundamentals(symbol);
     res.json({ ok: true, data });
   } catch (err) {
+    console.error(`[fund] ${req.params.symbol}:`, err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -73,7 +75,7 @@ router.get('/:symbol/news', async (req, res) => {
   }
 });
 
-// POST /api/stock/batch — { symbols: ['NVDA','TSM',...] }
+// POST /api/stock/batch
 router.post('/batch', async (req, res) => {
   try {
     const { symbols } = req.body;
