@@ -55,6 +55,13 @@ app.get('/api/debug/:symbol', async (req, res) => {
     result.tests.alpha_vantage = { ok: keys.length > 0, days: keys.length, latest: keys[0], note: d.Note || d.Information || null };
   } catch(e) { result.tests.alpha_vantage = { ok: false, error: e.message }; }
 
+  // Test full stock route (history)
+  try {
+    const { getQuote } = await import('./services/yahoo.js');
+    const q = await getQuote(sym);
+    result.tests.stock_history = { ok: q.history.length > 0, days: q.history.length, first: q.history[0]?.date, last: q.history.at(-1)?.date };
+  } catch(e) { result.tests.stock_history = { ok: false, error: e.message }; }
+
   res.json(result);
 });
 
