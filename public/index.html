@@ -763,10 +763,31 @@ function addToPortfolioPrompt(){if(!curSym)return;showModal(`<h3>เพิ่ม
 function savePAI(){const s=parseFloat(document.getElementById('ppS').value),c=parseFloat(document.getElementById('ppC').value);if(!s||!c){alert('กรอกให้ครบ');return;}state.portfolio=state.portfolio.filter(h=>h.symbol!==curSym);state.portfolio.push({symbol:curSym,shares:s,avgCost:c});saveState();closeModal();renderPortfolio();renderQuickChips();}
 
 // ══ WATCHLIST ══
-function renderWLTabs(){const el=document.getElementById('wlTabs');el.innerHTML=state.watchlists.map(wl=>`<span class="wl-chip ${state.activeWLId===wl.id?'active':''}" onclick="selectWL('${wl.id}')">${wl.name} <small style="color:var(--dim)">(${wl.symbols.length})</small></span>`).join('');}
+function renderWLTabs(){
+  const el=document.getElementById('wlTabs');
+  if(!el) return;
+  el.innerHTML=state.watchlists.map(wl=>
+    `<span class="wl-chip ${state.activeWLId===wl.id?'active':''}" onclick="selectWL('${wl.id}')">${wl.name} <small style="color:var(--dim)">(${wl.symbols.length})</small></span>`
+  ).join('');
+}
 function selectWL(id){state.activeWLId=id;renderWLTabs();loadWLData();}
-function openCreateWL(){showModal(`<h3>สร้าง Watchlist ใหม่</h3><input id="wlN" placeholder="ชื่อ เช่น AI Stocks" autofocus><div class="modal-actions"><button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button><button class="btn btn-primary btn-sm" onclick="createWL()">สร้าง</button></div>`);setTimeout(()=>document.getElementById('wlN')?.focus(),50);}
-function createWL(){const name=document.getElementById('wlN').value.trim();if(!name)return;const wl={id:Date.now()+'',name,symbols:[]};state.watchlists.push(wl);saveState();state.activeWLId=wl.id;closeModal();renderWLTabs();loadWLData();}
+function openCreateWL(){
+  showModal(`<h3>สร้าง Watchlist ใหม่</h3><input id="wlN" placeholder="ชื่อ เช่น AI Stocks, พอร์ตหลัก"><div class="modal-actions"><button class="btn btn-ghost btn-sm" onclick="closeModal()">ยกเลิก</button><button class="btn btn-primary btn-sm" onclick="createWL()">สร้าง</button></div>`);
+  setTimeout(()=>document.getElementById('wlN')?.focus(),100);
+}
+function createWL(){
+  const name=document.getElementById('wlN')?.value.trim();
+  if(!name){alert('ใส่ชื่อ Watchlist ด้วยครับ');return;}
+  const wl={id:Date.now()+'',name,symbols:[]};
+  state.watchlists.push(wl);
+  saveState();
+  state.activeWLId=wl.id;
+  closeModal();
+  // switch to watchlist view
+  switchView('watchlist', document.querySelector('[data-view="watchlist"]'));
+  renderWLTabs();
+  loadWLData();
+}
 function addToCurrentWL(){const sym=document.getElementById('wlAddSym').value.trim().toUpperCase();if(!sym||!state.activeWLId)return;const wl=state.watchlists.find(w=>w.id===state.activeWLId);if(wl&&!wl.symbols.includes(sym)){wl.symbols.push(sym);saveState();}document.getElementById('wlAddSym').value='';renderWLTabs();loadWLData();}
 function removeFromWL(sym){const wl=state.watchlists.find(w=>w.id===state.activeWLId);if(wl){wl.symbols=wl.symbols.filter(s=>s!==sym);saveState();renderWLTabs();loadWLData();}}
 function refreshWL(){loadWLData();}
