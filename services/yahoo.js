@@ -1,39 +1,63 @@
-// Data source: Finnhub API (free, server-friendly, no cookie issues)
-// API key จาก process.env.FINNHUB_API_KEY
+// Data source: Finnhub (quote + fundamentals) + Alpha Vantage (historical)
+// FINNHUB_API_KEY + ALPHA_VANTAGE_KEY required in env
 
-const BASE = 'https://finnhub.io/api/v1';
+const FH  = 'https://finnhub.io/api/v1';
+const AV  = 'https://www.alphavantage.co/query';
 
-function key() {
-  const k = process.env.FINNHUB_API_KEY;
-  if (!k) throw new Error('FINNHUB_API_KEY not set');
-  return k;
-}
+function fhKey()  { return process.env.FINNHUB_API_KEY || ''; }
+function avKey()  { return process.env.ALPHA_VANTAGE_KEY || ''; }
 
-async function fhFetch(path) {
-  const url = `${BASE}${path}&token=${key()}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Finnhub ${res.status}: ${path}`);
+async function fhGet(path) {
+  const res = await fetch(`${FH}${path}&token=${fhKey()}`);
+  if (!res.ok) throw new Error(`Finnhub ${res.status}: ${path.split('?')[0]}`);
   return res.json();
 }
 
-// ── Quote + History ─────────────────────────────────────
+async function avGet(params) {
+  const qs = new URLSearchParams({ ...params, apikey: avKey() });
+  const res = await fetch(`${AV}?${qs}`);
+  if (!res.ok) throw new Error(`AlphaVantage ${res.status}`);
+  return res.json();
+}
+
+// ── Quote + History ──────────────────────────────────────
 export async function getQuote(symbol) {
-  const [q, candles, profile] = await Promise.all([
-    fhFetch(`/quote?symbol=${symbol}`),
-    fhFetch(`/stock/candle?symbol=${symbol}&resolution=D&from=${Math.floor((Date.now()-366*86400000)/1000)}&to=${Math.floor(Date.now()/1000)}`),
-    fhFetch(`/stock/profile2?symbol=${symbol}`),
+  // Finnhub: real-time quote + profile
+  const [q, profile] = await Promise.all([
+    fhGet(`/quote?symbol=${symbol}`),
+    fhGet(`/stock/profile2?symbol=${symbol}`),
   ]);
 
-  if (q.c === 0 && q.pc === 0) throw new Error(`Symbol not found: ${symbol}`);
+  if (!q.c) throw new Error(`Symbol not found: ${symbol}`);
 
-  const history = (candles.s === 'ok' ? candles.t : []).map((t, i) => ({
-    date:   new Date(t * 1000).toISOString().slice(0, 10),
-    open:   candles.o[i],
-    high:   candles.h[i],
-    low:    candles.l[i],
-    close:  candles.c[i],
-    volume: candles.v[i],
-  })).filter(d => d.close);
+  // Alpha Vantage: daily history (compact = 100 days, full = 20yr)
+  let history = [];
+  if (avKey()) {
+    try {
+      const av = await avGet({
+        function: 'TIME_SERIES_DAILY',
+        symbol,
+        outputsize: 'full',
+        datatype: 'json',
+      });
+      const ts = av['Time Series (Daily)'];
+      if (ts) {
+        history = Object.entries(ts)
+          .map(([date, v]) => ({
+            date,
+            open:   parseFloat(v['1. open']),
+            high:   parseFloat(v['2. high']),
+            low:    parseFloat(v['3. low']),
+            close:  parseFloat(v['4. close']),
+            volume: parseInt(v['5. volume']),
+          }))
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .slice(-252);
+      }
+    } catch(e) {
+      console.warn('AV history failed:', e.message);
+    }
+  }
 
   return {
     symbol,
@@ -41,11 +65,11 @@ export async function getQuote(symbol) {
     currency:      'USD',
     exchange:      profile.exchange || '',
     price:         q.c,
-    change:        q.d,
-    changePct:     q.dp,
-    previousClose: q.pc,
+    change:        q.d  ?? 0,
+    changePct:     q.dp ?? 0,
+    previousClose: q.pc ?? q.c,
     marketCap:     profile.marketCapitalization ? profile.marketCapitalization * 1e6 : null,
-    week52High:    q.h,   // today's high — finnhub free doesn't give 52W
+    week52High:    q.h,
     week52Low:     q.l,
     history,
   };
@@ -54,18 +78,20 @@ export async function getQuote(symbol) {
 // ── Fundamentals ─────────────────────────────────────────
 export async function getFundamentals(symbol) {
   const [metrics, rec] = await Promise.all([
-    fhFetch(`/stock/metric?symbol=${symbol}&metric=all`),
-    fhFetch(`/stock/recommendation?symbol=${symbol}`),
+    fhGet(`/stock/metric?symbol=${symbol}&metric=all`),
+    fhGet(`/stock/recommendation?symbol=${symbol}`).catch(() => []),
   ]);
 
   const m = metrics.metric || {};
-  const latestRec = rec?.[0];
-
-  // Analyst recommendation key
-  const totalRec = latestRec ? (latestRec.buy||0)+(latestRec.hold||0)+(latestRec.sell||0)+(latestRec.strongBuy||0)+(latestRec.strongSell||0) : 0;
+  const latestRec = Array.isArray(rec) ? rec[0] : null;
+  const totalRec  = latestRec
+    ? (latestRec.buy||0)+(latestRec.hold||0)+(latestRec.sell||0)+(latestRec.strongBuy||0)+(latestRec.strongSell||0)
+    : 0;
   const recKey = latestRec
-    ? (latestRec.strongBuy+latestRec.buy > latestRec.strongSell+latestRec.sell ? 'buy' : 'hold')
+    ? ((latestRec.strongBuy||0)+(latestRec.buy||0) > (latestRec.strongSell||0)+(latestRec.sell||0) ? 'buy' : 'hold')
     : null;
+
+  const pct = v => v != null ? v / 100 : null;
 
   return {
     trailingPE:              m['peBasicExclExtraTTM'],
@@ -73,20 +99,20 @@ export async function getFundamentals(symbol) {
     priceToBook:             m['pbAnnual'],
     pegRatio:                m['pegNormalizedAnnual'],
     enterpriseToEbitda:      m['evEbitdaAnnual'],
-    returnOnEquity:          m['roeTTM'] != null ? m['roeTTM']/100 : null,
-    returnOnAssets:          m['roaTTM'] != null ? m['roaTTM']/100 : null,
-    profitMargins:           m['netProfitMarginTTM'] != null ? m['netProfitMarginTTM']/100 : null,
-    grossMargins:            m['grossMarginTTM'] != null ? m['grossMarginTTM']/100 : null,
-    operatingMargins:        m['operatingMarginTTM'] != null ? m['operatingMarginTTM']/100 : null,
-    revenueGrowth:           m['revenueGrowthTTMYoy'] != null ? m['revenueGrowthTTMYoy']/100 : null,
-    earningsGrowth:          m['epsGrowthTTMYoy'] != null ? m['epsGrowthTTMYoy']/100 : null,
+    returnOnEquity:          pct(m['roeTTM']),
+    returnOnAssets:          pct(m['roaTTM']),
+    profitMargins:           pct(m['netProfitMarginTTM']),
+    grossMargins:            pct(m['grossMarginTTM']),
+    operatingMargins:        pct(m['operatingMarginTTM']),
+    revenueGrowth:           pct(m['revenueGrowthTTMYoy']),
+    earningsGrowth:          pct(m['epsGrowthTTMYoy']),
     totalRevenue:            m['revenueTTM'],
     totalCash:               null,
-    totalDebt:               m['totalDebt/totalEquityAnnual'],
+    totalDebt:               null,
     debtToEquity:            m['totalDebt/totalEquityAnnual'],
     currentRatio:            m['currentRatioAnnual'],
-    dividendYield:           m['dividendYieldIndicatedAnnual'] != null ? m['dividendYieldIndicatedAnnual']/100 : null,
-    payoutRatio:             m['payoutRatioAnnual'] != null ? m['payoutRatioAnnual']/100 : null,
+    dividendYield:           pct(m['dividendYieldIndicatedAnnual']),
+    payoutRatio:             pct(m['payoutRatioAnnual']),
     trailingEps:             m['epsTTM'],
     forwardEps:              m['epsNormalizedAnnual'],
     sharesOutstanding:       m['sharesOutstanding'],
@@ -103,14 +129,16 @@ export async function getFundamentals(symbol) {
 export async function getMultipleQuotes(symbols) {
   const results = await Promise.allSettled(
     symbols.map(async s => {
-      const q = await fhFetch(`/quote?symbol=${s}`);
-      const p = await fhFetch(`/stock/profile2?symbol=${s}`);
+      const [q, p] = await Promise.all([
+        fhGet(`/quote?symbol=${s}`),
+        fhGet(`/stock/profile2?symbol=${s}`).catch(() => ({})),
+      ]);
       return {
         symbol: s,
-        shortName: p.name || s,
-        regularMarketPrice:          q.c,
-        regularMarketChange:         q.d,
-        regularMarketChangePercent:  q.dp,
+        shortName:                  p.name || s,
+        regularMarketPrice:         q.c,
+        regularMarketChange:        q.d,
+        regularMarketChangePercent: q.dp,
         marketCap: p.marketCapitalization ? p.marketCapitalization * 1e6 : null,
       };
     })
@@ -121,14 +149,14 @@ export async function getMultipleQuotes(symbols) {
 // ── News ─────────────────────────────────────────────────
 export async function getNews(symbol) {
   const to   = new Date().toISOString().slice(0, 10);
-  const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const from = new Date(Date.now() - 7*86400000).toISOString().slice(0, 10);
   try {
-    const data = await fhFetch(`/company-news?symbol=${symbol}&from=${from}&to=${to}`);
+    const data = await fhGet(`/company-news?symbol=${symbol}&from=${from}&to=${to}`);
     return (Array.isArray(data) ? data : []).slice(0, 10).map(n => ({
       title:       n.headline,
       link:        n.url,
       pubDate:     new Date(n.datetime * 1000).toUTCString(),
-      description: n.summary?.slice(0, 200),
+      description: n.summary?.slice(0, 200) || '',
     }));
   } catch {
     return [];
