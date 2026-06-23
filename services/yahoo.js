@@ -1,163 +1,135 @@
-// Yahoo Finance unofficial API proxy service
+// Data source: Finnhub API (free, server-friendly, no cookie issues)
+// API key จาก process.env.FINNHUB_API_KEY
 
-const BASE  = 'https://query1.finance.yahoo.com/v8/finance';
-const BASE2 = 'https://query2.finance.yahoo.com/v10/finance';
+const BASE = 'https://finnhub.io/api/v1';
 
-// Full browser-like headers — required when calling from server (Railway)
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Accept-Encoding': 'gzip, deflate, br',
-  'Cache-Control': 'no-cache',
-  'Pragma': 'no-cache',
-  'Sec-Fetch-Dest': 'document',
-  'Sec-Fetch-Mode': 'navigate',
-  'Sec-Fetch-Site': 'none',
-  'Upgrade-Insecure-Requests': '1',
-};
-
-// Fetch with retry on alternate host
-async function yFetch(url) {
-  // Try query1 first, fall back to query2
-  const urls = [
-    url,
-    url.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com'),
-  ];
-  let lastErr;
-  for (const u of urls) {
-    try {
-      const res = await fetch(u, { headers: HEADERS });
-      if (res.ok) return res;
-      lastErr = new Error(`HTTP ${res.status} from ${u}`);
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr;
+function key() {
+  const k = process.env.FINNHUB_API_KEY;
+  if (!k) throw new Error('FINNHUB_API_KEY not set');
+  return k;
 }
 
-// EOD + live quote
+async function fhFetch(path) {
+  const url = `${BASE}${path}&token=${key()}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Finnhub ${res.status}: ${path}`);
+  return res.json();
+}
+
+// ── Quote + History ─────────────────────────────────────
 export async function getQuote(symbol) {
-  const url = `${BASE}/chart/${symbol}?interval=1d&range=1y&includePrePost=false&events=div,split`;
-  const res = await yFetch(url);
-  const data = await res.json();
+  const [q, candles, profile] = await Promise.all([
+    fhFetch(`/quote?symbol=${symbol}`),
+    fhFetch(`/stock/candle?symbol=${symbol}&resolution=D&from=${Math.floor((Date.now()-366*86400000)/1000)}&to=${Math.floor(Date.now()/1000)}`),
+    fhFetch(`/stock/profile2?symbol=${symbol}`),
+  ]);
 
-  if (!data?.chart?.result?.[0]) {
-    throw new Error(`No data for symbol: ${symbol}`);
-  }
+  if (q.c === 0 && q.pc === 0) throw new Error(`Symbol not found: ${symbol}`);
 
-  const result = data.chart.result[0];
-  const meta   = result.meta;
-  const q      = result.indicators.quote[0];
-  const ts     = result.timestamp || [];
-
-  const history = ts.map((t, i) => ({
+  const history = (candles.s === 'ok' ? candles.t : []).map((t, i) => ({
     date:   new Date(t * 1000).toISOString().slice(0, 10),
-    open:   q.open[i],
-    high:   q.high[i],
-    low:    q.low[i],
-    close:  q.close[i],
-    volume: q.volume[i],
-  })).filter(d => d.close != null);
+    open:   candles.o[i],
+    high:   candles.h[i],
+    low:    candles.l[i],
+    close:  candles.c[i],
+    volume: candles.v[i],
+  })).filter(d => d.close);
 
   return {
-    symbol:               meta.symbol,
-    shortName:            meta.shortName || symbol,
-    currency:             meta.currency,
-    exchange:             meta.exchangeName,
-    price:                meta.regularMarketPrice,
-    change:               meta.regularMarketPrice - meta.previousClose,
-    changePct:            ((meta.regularMarketPrice - meta.previousClose) / meta.previousClose) * 100,
-    previousClose:        meta.previousClose,
-    marketCap:            meta.marketCap,
-    week52High:           meta.fiftyTwoWeekHigh,
-    week52Low:            meta.fiftyTwoWeekLow,
+    symbol,
+    shortName:     profile.name || symbol,
+    currency:      'USD',
+    exchange:      profile.exchange || '',
+    price:         q.c,
+    change:        q.d,
+    changePct:     q.dp,
+    previousClose: q.pc,
+    marketCap:     profile.marketCapitalization ? profile.marketCapitalization * 1e6 : null,
+    week52High:    q.h,   // today's high — finnhub free doesn't give 52W
+    week52Low:     q.l,
     history,
   };
 }
 
-// Fundamental / summary stats
+// ── Fundamentals ─────────────────────────────────────────
 export async function getFundamentals(symbol) {
-  const url = `${BASE2}/quoteSummary/${symbol}?modules=defaultKeyStatistics,financialData,summaryDetail,earningsHistory`;
-  const res = await yFetch(url);
-  const data = await res.json();
+  const [metrics, rec] = await Promise.all([
+    fhFetch(`/stock/metric?symbol=${symbol}&metric=all`),
+    fhFetch(`/stock/recommendation?symbol=${symbol}`),
+  ]);
 
-  if (!data?.quoteSummary?.result?.[0]) {
-    throw new Error(`No fundamental data for: ${symbol}`);
-  }
+  const m = metrics.metric || {};
+  const latestRec = rec?.[0];
 
-  const r    = data.quoteSummary.result[0];
-  const safe = (obj, k) => obj?.[k]?.raw ?? null;
-  const fin  = r.financialData;
-  const stats= r.defaultKeyStatistics;
-  const sum  = r.summaryDetail;
-
-  const epsHistory = r.earningsHistory?.history?.map(e => ({
-    quarter:         e.period,
-    epsActual:       safe(e, 'epsActual'),
-    epsEstimate:     safe(e, 'epsEstimate'),
-    surprisePercent: safe(e, 'surprisePercent'),
-  })) ?? [];
+  // Analyst recommendation key
+  const totalRec = latestRec ? (latestRec.buy||0)+(latestRec.hold||0)+(latestRec.sell||0)+(latestRec.strongBuy||0)+(latestRec.strongSell||0) : 0;
+  const recKey = latestRec
+    ? (latestRec.strongBuy+latestRec.buy > latestRec.strongSell+latestRec.sell ? 'buy' : 'hold')
+    : null;
 
   return {
-    trailingPE:           safe(sum,   'trailingPE'),
-    forwardPE:            safe(stats, 'forwardPE'),
-    priceToBook:          safe(stats, 'priceToBook'),
-    pegRatio:             safe(stats, 'pegRatio'),
-    enterpriseToEbitda:   safe(stats, 'enterpriseToEbitda'),
-    returnOnEquity:       safe(fin,   'returnOnEquity'),
-    returnOnAssets:       safe(fin,   'returnOnAssets'),
-    profitMargins:        safe(fin,   'profitMargins'),
-    grossMargins:         safe(fin,   'grossMargins'),
-    operatingMargins:     safe(fin,   'operatingMargins'),
-    revenueGrowth:        safe(fin,   'revenueGrowth'),
-    earningsGrowth:       safe(fin,   'earningsGrowth'),
-    totalRevenue:         safe(fin,   'totalRevenue'),
-    totalCash:            safe(fin,   'totalCash'),
-    totalDebt:            safe(fin,   'totalDebt'),
-    debtToEquity:         safe(fin,   'debtToEquity'),
-    currentRatio:         safe(fin,   'currentRatio'),
-    dividendYield:        safe(sum,   'dividendYield'),
-    payoutRatio:          safe(sum,   'payoutRatio'),
-    trailingEps:          safe(stats, 'trailingEps'),
-    forwardEps:           safe(fin,   'earningsPerShare'),
-    sharesOutstanding:    safe(stats, 'sharesOutstanding'),
-    targetMeanPrice:      safe(fin,   'targetMeanPrice'),
-    targetHighPrice:      safe(fin,   'targetHighPrice'),
-    targetLowPrice:       safe(fin,   'targetLowPrice'),
-    recommendationMean:   safe(fin,   'recommendationMean'),
-    recommendationKey:    fin?.recommendationKey ?? null,
-    numberOfAnalystOpinions: safe(fin, 'numberOfAnalystOpinions'),
-    epsHistory,
+    trailingPE:              m['peBasicExclExtraTTM'],
+    forwardPE:               m['peExclExtraAnnual'],
+    priceToBook:             m['pbAnnual'],
+    pegRatio:                m['pegNormalizedAnnual'],
+    enterpriseToEbitda:      m['evEbitdaAnnual'],
+    returnOnEquity:          m['roeTTM'] != null ? m['roeTTM']/100 : null,
+    returnOnAssets:          m['roaTTM'] != null ? m['roaTTM']/100 : null,
+    profitMargins:           m['netProfitMarginTTM'] != null ? m['netProfitMarginTTM']/100 : null,
+    grossMargins:            m['grossMarginTTM'] != null ? m['grossMarginTTM']/100 : null,
+    operatingMargins:        m['operatingMarginTTM'] != null ? m['operatingMarginTTM']/100 : null,
+    revenueGrowth:           m['revenueGrowthTTMYoy'] != null ? m['revenueGrowthTTMYoy']/100 : null,
+    earningsGrowth:          m['epsGrowthTTMYoy'] != null ? m['epsGrowthTTMYoy']/100 : null,
+    totalRevenue:            m['revenueTTM'],
+    totalCash:               null,
+    totalDebt:               m['totalDebt/totalEquityAnnual'],
+    debtToEquity:            m['totalDebt/totalEquityAnnual'],
+    currentRatio:            m['currentRatioAnnual'],
+    dividendYield:           m['dividendYieldIndicatedAnnual'] != null ? m['dividendYieldIndicatedAnnual']/100 : null,
+    payoutRatio:             m['payoutRatioAnnual'] != null ? m['payoutRatioAnnual']/100 : null,
+    trailingEps:             m['epsTTM'],
+    forwardEps:              m['epsNormalizedAnnual'],
+    sharesOutstanding:       m['sharesOutstanding'],
+    targetMeanPrice:         null,
+    targetHighPrice:         null,
+    targetLowPrice:          null,
+    recommendationKey:       recKey,
+    numberOfAnalystOpinions: totalRec,
+    epsHistory:              [],
   };
 }
 
-// Batch quotes for portfolio / watchlist
+// ── Batch quotes ─────────────────────────────────────────
 export async function getMultipleQuotes(symbols) {
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(',')}&fields=symbol,shortName,regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,marketCap`;
-  const res = await yFetch(url);
-  const data = await res.json();
-  return data?.quoteResponse?.result ?? [];
+  const results = await Promise.allSettled(
+    symbols.map(async s => {
+      const q = await fhFetch(`/quote?symbol=${s}`);
+      const p = await fhFetch(`/stock/profile2?symbol=${s}`);
+      return {
+        symbol: s,
+        shortName: p.name || s,
+        regularMarketPrice:          q.c,
+        regularMarketChange:         q.d,
+        regularMarketChangePercent:  q.dp,
+        marketCap: p.marketCapitalization ? p.marketCapitalization * 1e6 : null,
+      };
+    })
+  );
+  return results.filter(r => r.status === 'fulfilled').map(r => r.value);
 }
 
-// News RSS
+// ── News ─────────────────────────────────────────────────
 export async function getNews(symbol) {
-  const url = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${symbol}&region=US&lang=en-US`;
+  const to   = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
   try {
-    const res = await fetch(url, { headers: HEADERS });
-    if (!res.ok) return [];
-    const text = await res.text();
-    return [...text.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(m => {
-      const b     = m[1];
-      const title = b.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1]
-                  ?? b.match(/<title>(.*?)<\/title>/)?.[1] ?? '';
-      const link  = b.match(/<link>(.*?)<\/link>/)?.[1] ?? '';
-      const pubDate = b.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] ?? '';
-      const description = (b.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/)?.[1] ?? '')
-                          .replace(/<[^>]+>/g, '').slice(0, 200);
-      return { title, link, pubDate, description };
-    }).slice(0, 10);
+    const data = await fhFetch(`/company-news?symbol=${symbol}&from=${from}&to=${to}`);
+    return (Array.isArray(data) ? data : []).slice(0, 10).map(n => ({
+      title:       n.headline,
+      link:        n.url,
+      pubDate:     new Date(n.datetime * 1000).toUTCString(),
+      description: n.summary?.slice(0, 200),
+    }));
   } catch {
     return [];
   }
