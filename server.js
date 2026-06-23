@@ -28,6 +28,36 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
+// Debug — test data sources
+app.get('/api/debug/:symbol', async (req, res) => {
+  const sym = req.params.symbol.toUpperCase();
+  const result = { symbol: sym, env: {}, tests: {} };
+
+  // Check env vars
+  result.env.FINNHUB  = !!process.env.FINNHUB_API_KEY;
+  result.env.AV       = !!process.env.ALPHA_VANTAGE_KEY;
+  result.env.DATABASE = !!process.env.DATABASE_URL;
+  result.env.ANTHROPIC= !!process.env.ANTHROPIC_API_KEY;
+
+  // Test Finnhub quote
+  try {
+    const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${process.env.FINNHUB_API_KEY}`);
+    const d = await r.json();
+    result.tests.finnhub_quote = { ok: !!d.c, price: d.c, status: r.status };
+  } catch(e) { result.tests.finnhub_quote = { ok: false, error: e.message }; }
+
+  // Test Alpha Vantage history
+  try {
+    const r = await fetch(`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${sym}&outputsize=compact&apikey=${process.env.ALPHA_VANTAGE_KEY}`);
+    const d = await r.json();
+    const ts = d['Time Series (Daily)'];
+    const keys = ts ? Object.keys(ts) : [];
+    result.tests.alpha_vantage = { ok: keys.length > 0, days: keys.length, latest: keys[0], note: d.Note || d.Information || null };
+  } catch(e) { result.tests.alpha_vantage = { ok: false, error: e.message }; }
+
+  res.json(result);
+});
+
 // SPA fallback
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
