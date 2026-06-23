@@ -31,39 +31,51 @@ async function stooqHistory(symbol) {
 
   // stooq uses lowercase symbol with .us suffix for US stocks
   const sym = symbol.toLowerCase() + '.us';
-  const to   = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const from = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
-  const url  = `https://stooq.com/q/d/l/?s=${sym}&d1=${from}&d2=${to}&i=d`;
+  const url = `https://stooq.com/q/d/l/?s=${sym}&i=d`;
 
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-  });
-  if (!res.ok) throw new Error(`Stooq ${res.status} for ${symbol}`);
-  const text = await res.text();
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
 
-  // Parse CSV: Date,Open,High,Low,Close,Volume
-  const lines = text.trim().split('\n');
-  if (lines.length < 2 || lines[0].includes('No data')) {
-    throw new Error(`No history data from Stooq for ${symbol}`);
+    console.log(`[stooq] ${symbol} status: ${res.status}`);
+    if (!res.ok) throw new Error(`Stooq HTTP ${res.status}`);
+
+    const text = await res.text();
+    console.log(`[stooq] ${symbol} response (first 200): ${text.slice(0, 200)}`);
+
+    const lines = text.trim().split('\n');
+    if (lines.length < 2) throw new Error(`Stooq: too few lines (${lines.length})`);
+    if (text.includes('No data') || text.includes('Exceeded')) throw new Error(`Stooq: ${text.slice(0, 100)}`);
+
+    const history = lines.slice(1)
+      .map(line => {
+        const parts = line.split(',');
+        if (parts.length < 5) return null;
+        const [date, open, high, low, close, volume] = parts;
+        return {
+          date: date.trim(),
+          open:   parseFloat(open),
+          high:   parseFloat(high),
+          low:    parseFloat(low),
+          close:  parseFloat(close),
+          volume: parseInt(volume) || 0,
+        };
+      })
+      .filter(d => d && d.close && !isNaN(d.close) && d.date.match(/^\d{4}-\d{2}-\d{2}$/))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-252);
+
+    console.log(`[stooq] ${symbol}: ${history.length} days, last: ${history.at(-1)?.date}`);
+    if (history.length > 0) cacheSet(`hist:${symbol}`, history, TTL_HIST);
+    return history;
+  } catch(e) {
+    console.error(`[stooq] ${symbol} error: ${e.message}`);
+    return [];
   }
-
-  const history = lines.slice(1).map(line => {
-    const [date, open, high, low, close, volume] = line.split(',');
-    return {
-      date,
-      open:   parseFloat(open),
-      high:   parseFloat(high),
-      low:    parseFloat(low),
-      close:  parseFloat(close),
-      volume: parseInt(volume) || 0,
-    };
-  }).filter(d => d.close && !isNaN(d.close))
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-252);
-
-  console.log(`[stooq] ${symbol}: ${history.length} days`);
-  cacheSet(`hist:${symbol}`, history, TTL_HIST);
-  return history;
 }
 
 // ── Quote + History ────────────────────────────────────────
