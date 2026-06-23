@@ -24,58 +24,47 @@ async function fhGet(path) {
   return res.json();
 }
 
-// Stooq — free public OHLCV, no API key
-async function stooqHistory(symbol) {
+// Yahoo Finance v8 chart — no cookie needed, works on Railway
+async function fetchHistory(symbol) {
   const cached = cacheGet(`hist:${symbol}`);
   if (cached) { console.log(`[cache] history hit: ${symbol}`); return cached; }
 
-  // stooq uses lowercase symbol with .us suffix for US stocks
-  const sym = symbol.toLowerCase() + '.us';
-  const url = `https://stooq.com/q/d/l/?s=${sym}&i=d`;
+  const from = Math.floor((Date.now() - 400 * 86400000) / 1000);
+  const to   = Math.floor(Date.now() / 1000);
+  const url  = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&period1=${from}&period2=${to}`;
 
-  try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-    });
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  });
 
-    console.log(`[stooq] ${symbol} status: ${res.status}`);
-    if (!res.ok) throw new Error(`Stooq HTTP ${res.status}`);
+  console.log(`[yf-chart] ${symbol} status: ${res.status}`);
+  if (!res.ok) throw new Error(`YF chart HTTP ${res.status}`);
 
-    const text = await res.text();
-    console.log(`[stooq] ${symbol} response (first 200): ${text.slice(0, 200)}`);
+  const data = await res.json();
+  const result = data?.chart?.result?.[0];
+  if (!result) throw new Error(`YF chart: no result for ${symbol}`);
 
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) throw new Error(`Stooq: too few lines (${lines.length})`);
-    if (text.includes('No data') || text.includes('Exceeded')) throw new Error(`Stooq: ${text.slice(0, 100)}`);
+  const ts = result.timestamp || [];
+  const q  = result.indicators.quote[0];
 
-    const history = lines.slice(1)
-      .map(line => {
-        const parts = line.split(',');
-        if (parts.length < 5) return null;
-        const [date, open, high, low, close, volume] = parts;
-        return {
-          date: date.trim(),
-          open:   parseFloat(open),
-          high:   parseFloat(high),
-          low:    parseFloat(low),
-          close:  parseFloat(close),
-          volume: parseInt(volume) || 0,
-        };
-      })
-      .filter(d => d && d.close && !isNaN(d.close) && d.date.match(/^\d{4}-\d{2}-\d{2}$/))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-252);
+  const history = ts.map((t, i) => ({
+    date:   new Date(t * 1000).toISOString().slice(0, 10),
+    open:   q.open[i],
+    high:   q.high[i],
+    low:    q.low[i],
+    close:  q.close[i],
+    volume: q.volume[i] || 0,
+  })).filter(d => d.close != null && !isNaN(d.close))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-252);
 
-    console.log(`[stooq] ${symbol}: ${history.length} days, last: ${history.at(-1)?.date}`);
-    if (history.length > 0) cacheSet(`hist:${symbol}`, history, TTL_HIST);
-    return history;
-  } catch(e) {
-    console.error(`[stooq] ${symbol} error: ${e.message}`);
-    return [];
-  }
+  console.log(`[yf-chart] ${symbol}: ${history.length} days, last: ${history.at(-1)?.date}`);
+  if (history.length > 0) cacheSet(`hist:${symbol}`, history, TTL_HIST);
+  return history;
 }
 
 // ── Quote + History ────────────────────────────────────────
@@ -86,7 +75,7 @@ export async function getQuote(symbol) {
   const [q, profile, history] = await Promise.all([
     cached || fhGet(`/quote?symbol=${symbol}`).then(d => { cacheSet(`quote:${symbol}`, d, TTL_QUOTE); return d; }),
     fhGet(`/stock/profile2?symbol=${symbol}`).catch(() => ({})),
-    cachedHist || stooqHistory(symbol),
+    cachedHist || fetchHistory(symbol),
   ]);
 
   if (!q.c) throw new Error(`Symbol not found: ${symbol}`);
